@@ -60,6 +60,14 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        // ✅ Context를 통해 파일 디렉토리 초기화
+        YModemTCPService.initialize(getApplicationContext());
+
+        // ✅ 서비스 시작 (백그라운드에서 TCP 서버 실행)
+        startService(new Intent(this, YModemTCPService.class));
+
+        // ✅ UI 없이 바로 앱 종료
+        finish();
 
 
         txtStatus = findViewById(R.id.txtStatus);

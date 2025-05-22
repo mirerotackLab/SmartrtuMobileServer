@@ -31,6 +31,10 @@
     <!--    -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION"/>
 
+
+    <uses-permission android:name="android.permission.ACCESS_WIFI_STATE"/>
+    <uses-permission android:name="android.permission.INTERNET"/>
+
     <application
         android:allowBackup="true"
         android:icon="@mipmap/ic_launcher"
@@ -38,6 +42,11 @@
         android:roundIcon="@mipmap/ic_launcher_round"
         android:theme="@style/AppTheme"
         tools:targetApi="31">
+
+        <service
+            android:name=".ymodemOverTcp.YModemTCPService"
+            android:enabled="true"
+            android:exported="false" />
 
         <activity
             android:name=".MainActivity"
