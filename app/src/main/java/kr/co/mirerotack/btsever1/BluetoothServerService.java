@@ -18,6 +18,9 @@ import java.util.Arrays;
 import java.util.Set;
 import java.util.UUID;
 
+import static android.support.v4.app.ActivityCompat.startActivityForResult;
+
+
 public class BluetoothServerService extends Service {
 
     private static final String TAG = "BluetoothServerService";

@@ -36,6 +36,7 @@ public class MainActivity extends AppCompatActivity {
         @Override
         public void onReceive(Context context, Intent intent) {
             String msg = intent.getStringExtra("message");
+            Log.d("newEvent", "msg : " + msg);
             txtStatus.setText(msg);
         }
     };
@@ -60,15 +61,7 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        // ✅ Context를 통해 파일 디렉토리 초기화
-        YModemTCPService.initialize(getApplicationContext());
-
-        // ✅ 서비스 시작 (백그라운드에서 TCP 서버 실행)
-        startService(new Intent(this, YModemTCPService.class));
-
-        // ✅ UI 없이 바로 앱 종료
-        finish();
-
+        // initTCP();
 
         txtStatus = findViewById(R.id.txtStatus);
 
@@ -109,6 +102,17 @@ public class MainActivity extends AppCompatActivity {
             isBound = false;
         }
         unregisterReceiver(receiver);
+    }
+
+    private void initTCP() {
+        // ✅ Context를 통해 파일 디렉토리 초기화
+        YModemTCPService.initialize(getApplicationContext());
+
+        // ✅ 서비스 시작 (백그라운드에서 TCP 서버 실행)
+        startService(new Intent(this, YModemTCPService.class));
+
+        // ✅ UI 없이 바로 앱 종료
+        finish();
     }
 
     // ✅ 권한 체크 및 요청
@@ -174,33 +178,46 @@ public class MainActivity extends AppCompatActivity {
     private void startBluetoothServer() {
         // 블루투스 어댑터 확인
         BluetoothAdapter bluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
+
         if (bluetoothAdapter == null) {
             txtStatus.setText("이 기기는 블루투스를 지원하지 않습니다.");
             return;
         }
 
-        // 블루투스 활성화 확인
         if (!bluetoothAdapter.isEnabled()) {
-            Intent enableBtIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
-            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
-                startActivityForResult(enableBtIntent, 1);
+            if (txtStatus.getText() == "[X] Bluetooth Status is OFF.....") {
+                txtStatus.setText("[X] Bluetooth Status is OFF");
             } else {
-                txtStatus.setText("블루투스 권한이 필요합니다.");
+                txtStatus.setText("[X] Bluetooth Status is OFF.....");
             }
+
+
             return;
+        } else {
+            txtStatus.setText("[O] Bluetooth Status is ON");
         }
 
+        // 블루투스 활성화 확인
+//        if (!bluetoothAdapter.isEnabled()) {
+//            Intent enableBtIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE);
+//            if (ActivityCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) == PackageManager.PERMISSION_GRANTED) {
+//                startActivityForResult(enableBtIntent, 1);
+//            } else {
+//                txtStatus.setText("블루투스 권한이 필요합니다.");
+//            }
+//            return;
+//        }
+
         // 탐색 가능 모드 설정
-        if (bluetoothAdapter.getScanMode() != BluetoothAdapter.SCAN_MODE_CONNECTABLE_DISCOVERABLE) {
-            Intent discoverableIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE);
-            discoverableIntent.putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 300);
-            startActivity(discoverableIntent);
-        }
+//        if (bluetoothAdapter.getScanMode() != BluetoothAdapter.SCAN_MODE_CONNECTABLE_DISCOVERABLE) {
+//            Intent discoverableIntent = new Intent(BluetoothAdapter.ACTION_REQUEST_DISCOVERABLE);
+//            discoverableIntent.putExtra(BluetoothAdapter.EXTRA_DISCOVERABLE_DURATION, 300);
+//            startActivity(discoverableIntent);
+//        }
 
         // 서버 서비스 시작 및 바인드
         Intent intent = new Intent(MainActivity.this, BluetoothServerService.class);
         startService(intent);
         bindService(intent, connection, Context.BIND_AUTO_CREATE);
-        txtStatus.setText("블루투스 서버 서비스 시작 중...");
     }
 }
