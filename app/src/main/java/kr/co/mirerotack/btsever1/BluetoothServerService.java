@@ -14,8 +14,12 @@ import com.google.gson.Gson;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.text.SimpleDateFormat;
 import java.util.Arrays;
+import java.util.Date;
+import java.util.Locale;
 import java.util.Set;
+import java.util.TimeZone;
 import java.util.UUID;
 
 import static android.support.v4.app.ActivityCompat.startActivityForResult;
@@ -289,11 +293,9 @@ public class BluetoothServerService extends Service {
             outputStream.write(dataBytes);
             outputStream.flush();
             sendMessageToUI("센서 데이터 전송 성공");
-            Log.d(TAG, "Dummy 데이터 전송 성공");
             return true;
         } catch (IOException e) {
             sendMessageToUI("센서 데이터 전송 실패 (IOException)");
-            Log.e(TAG, "데이터 전송 실패", e);
             return false;
         }
     }
@@ -351,9 +353,13 @@ public class BluetoothServerService extends Service {
         }
     }
 
-    private static RtuSnapshot createDummyData() {
+    public static RtuSnapshot createDummyData() {
         RtuSnapshot rtuSnapshot = new RtuSnapshot();
-        rtuSnapshot.timestamp = String.valueOf(System.currentTimeMillis());
+
+        SimpleDateFormat isoFormat = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSS'Z'", Locale.US);
+        isoFormat.setTimeZone(TimeZone.getTimeZone("UTC"));
+        String isoTimestamp = isoFormat.format(new Date());
+        rtuSnapshot.timestamp = isoTimestamp;
 
         rtuSnapshot.aiStatus = true;
         rtuSnapshot.aoStatus = false;

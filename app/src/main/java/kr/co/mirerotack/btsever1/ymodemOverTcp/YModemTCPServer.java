@@ -10,6 +10,8 @@ import android.os.Looper;
 import android.text.format.Formatter;
 import android.util.Log;
 
+import com.google.gson.Gson;
+
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
@@ -28,6 +30,9 @@ import java.net.SocketException;
 import java.net.SocketTimeoutException;
 import java.util.Enumeration;
 
+import kr.co.mirerotack.btsever1.RtuSnapshot;
+
+import static kr.co.mirerotack.btsever1.BluetoothServerService.createDummyData;
 import static kr.co.mirerotack.btsever1.ymodemOverTcp.Logger.getLogFilePath;
 import static kr.co.mirerotack.btsever1.ymodemOverTcp.Logger.initFileWriter;
 import static kr.co.mirerotack.btsever1.ymodemOverTcp.Logger.initPrintWriter;
@@ -63,6 +68,7 @@ class YModemTCPServer {
     private File APK_PATH;
     private String PackageBasePath = "kr.co.mirerotack";
     private String NEW_APK_FILE_NAME = "firmware.apk";
+    private String TAG = "YmodemTcpServer";
     private Context context;
 
     private int errorCount = 0;
@@ -135,7 +141,7 @@ class YModemTCPServer {
                             logMessage("[O] Port binding successful");
                         } catch (IOException e) {
                             logMessage("[X] Port binding failed: " + e.getMessage());
-                            Log.e("YModemTCPServer", "Port binding failed: " + e.getMessage());
+                            Log.e(TAG, "Port binding failed: " + e.getMessage());
                             e.printStackTrace(); // 콘솔 디버깅용
                         }
 
@@ -165,6 +171,7 @@ class YModemTCPServer {
                                 }
                                 logMessage("--------------------2. Waiting for socket---------------------");
                                 socket = sock.accept();      // 새로운 클라이언트 요청이 들어올 때까지 블로킹
+                                socket.setSoTimeout(5000); // 5초 타임아웃 설정
 
                                 logMessage("--------------------3. Starting to receive--------------------");
                                 configureSocket(socket);     // 송수신 버퍼 크기 및 타임아웃 설정
@@ -272,10 +279,12 @@ class YModemTCPServer {
             logMessage("[O] 3-2. Header received successfully");
             sendByte(outputStream, ACK, "4-1. [TX] ACK");
 
-            // 실행 옵션에 따른 처리 2025.04.08 추가
-            // if (yModem.getIsPingMode()) { handlePingMode(inputStream, outputStream); }
-            if (yModem.getIsRtuInfoMode()) { handleRtuInfoMode(inputStream, outputStream); }
-            // if (yModem.getIsProcessRunMode()) { handleProcessRunMode(inputStream, outputStream); }
+            if(yModem.getIsSyncDataMode()) {
+                logMessage("handleSyncDataMode Start");
+                syncData(inputStream, outputStream);
+
+                return;
+            }
 
             if (yModem.getIsRebootMode()) {
                 logMessage("handleRebootMode Start");
@@ -287,13 +296,9 @@ class YModemTCPServer {
                 return;
             }
 
-            if (yModem.getIsRtuInfoMode() || yModem.getIsRebootMode() || yModem.getIsIOTRtuMode()) {
-                return;
-            }
-
             // 2️⃣ [RX] APK 수신
             logMessage("5. Waiting for APK data...");
-            File receivedFile = yModem.receive_APK(new File(""), yModem.getIsAckMode());
+            File receivedFile = yModem.receive_APK(new File(""), false);
 
             if (!checkFileIntegrity(receivedFile, yModem.getExpectedFileSize(), outputStream))
                 return;
@@ -429,6 +434,26 @@ class YModemTCPServer {
             e.printStackTrace();
         } catch (PackageManager.NameNotFoundException e) {
             throw new RuntimeException(e);
+        }
+    }
+
+    private boolean syncData(InputStream inputStream, OutputStream outputStream) throws IOException {
+        try {
+            RtuSnapshot dummyData = createDummyData();
+            Gson gson = new Gson();
+            String jsonData = gson.toJson(dummyData);
+            byte[] dataBytes = jsonData.getBytes("UTF-8");
+
+            outputStream.write(dataBytes);
+            outputStream.flush();
+            logMessage("[RX] 8-1. 센서 데이터 전송 성공, data : " + dataBytes.toString());
+
+            sendAndReceiveACK(inputStream, outputStream);
+
+            return true;
+        } catch (IOException e) {
+            logMessage("[RX] 8-100. 센서 데이터 전송 실패 (IOException), " + e.getCause() + ", " + e.getMessage());
+            return false;
         }
     }
 

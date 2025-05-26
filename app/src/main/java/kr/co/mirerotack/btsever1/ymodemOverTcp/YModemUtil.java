@@ -151,7 +151,7 @@ class Logger {
                 File file = new File(getLogFilePath());
                 fileWriter = new FileWriter(file, true);
                 printWriter = new PrintWriter(fileWriter);
-                logMessage("[O] Log file initialization completed: " + getLogFilePath());
+                // logMessage("[O] Log file initialization completed: " + getLogFilePath());
             }
         } catch (IOException e) {
             Log.e(TAG, "[X] Log file initialization failed: " + e.getMessage());
@@ -222,8 +222,6 @@ class Logger {
 
     public static void logMessage(String message) {
         try {
-            initLogFile(); // ✅ 로그 파일 초기화 (최초 한 번만)
-            checkSizeOfLogFile(); // ✅ 로그 파일 크기 초과 시 정리
             if (printWriter != null) {
                 if (message.isEmpty()) {
                     message = "[NO OUTPUT]";

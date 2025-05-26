@@ -27,30 +27,19 @@ public class YModem {
         return fileName;
     }
     private long expectedFileSize = -1;  // 예상 파일 크기 저장 변수
-    private boolean isForceUpdateMode = false;
-    private boolean isAckMode = false;
-//    private boolean isPingMode = false;
-
-    // 2025 04 07 추가
-    private boolean isRtuInfoMode = false;
-//    private boolean isProcessRunMode = false;
+    private boolean isSyncDataMode = false;
     private boolean isRebootMode = false;
-    private boolean isIOTRtuMode = false;
+    private boolean isForceUpdateMode = false;
 
     public long getExpectedFileSize() {
         return expectedFileSize;
     }
 
+    public boolean getIsSyncDataMode() { return isSyncDataMode; }
+    public boolean getIsRebootMode() { return isRebootMode; }
     public boolean getIsForceUpdateMode() {
         return isForceUpdateMode;
     }
-    public boolean getIsAckMode() { return isAckMode; }
-    public boolean getIsRtuInfoMode() { return isRtuInfoMode; }
-    public boolean getIsRebootMode() { return isRebootMode; }
-    public boolean getIsIOTRtuMode() { return isIOTRtuMode; }
-
-    // public boolean getIsProcessRunMode() { return isProcessRunMode; }
-    // public boolean getIsPingMode() { return isPingMode; }
 
     String NULL = "\u0000";
     File filePath = null;
@@ -102,30 +91,24 @@ public class YModem {
             // header: b'smartrtu.apk \x00 3654326 \x00 1 \x00 0 \x00(이후 NULL 반복)'
             String[] headerParts = headerString.split(NULL);
 
-            if (headerParts.length < 6 || headerParts[1].trim().isEmpty()) {
+            if (headerParts.length < 5 || headerParts[1].trim().isEmpty()) {
                 logMessage("[X] Header parsing failed! Invalid data: " + headerString);
                 throw new IOException("Invalid YModem header: " + headerString);
             }
 
             try {
-                fileName = headerParts[0].trim();                          // [0] 파일 이름
-                expectedFileSize = Long.parseLong(headerParts[1].trim());  // [1] 파일 크기
-                isForceUpdateMode = headerParts[2].trim().equals("1");     // [2] 강제 업데이트 활성화
-                isAckMode = headerParts[3].trim().equals("1");             // [3] 패킷당 ACK 수신 모드
-                isRtuInfoMode = headerParts[4].trim().equals("1");         // [4] RTU 정보 (설치 유무, 실행 여부, APP 버전 확인)
-                isRebootMode = headerParts[5].trim().equals("1");          // [5] RTU 기기 재부팅
-                isIOTRtuMode = headerParts[5].trim().equals("1");          // [6] IOT RTU 인 경우
-
-                // isPingMode = headerParts[6].trim().equals("1");
-                // isProcessRunMode = headerParts[7].trim().equals("1");
+                fileName = headerParts[0].trim();                            // [0] 파일 이름
+                expectedFileSize = Long.parseLong(headerParts[1].trim());    // [1] 파일 크기
+                isSyncDataMode = headerParts[2].trim().equals("1");          // [2] 데이터 싱크 모드
+                isRebootMode = headerParts[3].trim().equals("1");            // [3] RTU 기기 재부팅
+                isForceUpdateMode = headerParts[4].trim().equals("1");       // [4] 강제 업데이트 활성화
             } catch (NumberFormatException e) {
                 logMessage("[X] Failed to convert file size: " + headerParts[1]);
                 throw new IOException("Invalid file size in header");
             }
 
             logMessage("[O] [Header] File name: " + fileName + ", Expected size: " + expectedFileSize + " bytes\n"
-                + ", Force update: " + getIsForceUpdateMode() + ", ACK mode: " + getIsAckMode()
-                + ", Rtu Info mode: " + getIsRtuInfoMode() + ", Reboot Mode: " + getIsRebootMode());
+                + ", SyncData Mode: " + getIsSyncDataMode() + ", Reboot Mode: " + getIsRebootMode() + ", Force update: " + getIsForceUpdateMode());
 
             // 📌 파일 저장 경로 설정 (파일 생성 X, 데이터 수신 후 저장)
             if (inDirectory) {
