@@ -18,10 +18,15 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.RandomAccessFile;
+import java.net.Inet4Address;
+import java.net.InetAddress;
 import java.net.InetSocketAddress;
+import java.net.NetworkInterface;
 import java.net.ServerSocket;
 import java.net.Socket;
+import java.net.SocketException;
 import java.net.SocketTimeoutException;
+import java.util.Enumeration;
 
 import static kr.co.mirerotack.btsever1.ymodemOverTcp.Logger.getLogFilePath;
 import static kr.co.mirerotack.btsever1.ymodemOverTcp.Logger.initFileWriter;
@@ -47,7 +52,7 @@ class YModemTCPServer {
     protected static final byte START_ACK = 'C'; /* YModem 프로토콜 시작 신호 */
     protected static final byte COM_TEST = 'T'; /* 취소 */
 
-    private static int PORT = 55555;
+    private static int PORT = 55556;
 
     // adb shell cat /proc/sys/net/core/rmem_max : 110592 -> 약 108KB
     // adb shell cat /proc/sys/net/core/wmem_max : 110592 -> 약 108KB
@@ -68,15 +73,23 @@ class YModemTCPServer {
         this.context = context;
     }
 
-    public static String getWifiIp(Context context) {
-        WifiManager wifiManager = (WifiManager) context.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
-        if (wifiManager != null && wifiManager.isWifiEnabled()) {
-            WifiInfo wifiInfo = wifiManager.getConnectionInfo();
-            int ipInt = wifiInfo.getIpAddress();
-            return Formatter.formatIpAddress(ipInt);
+    public static String getLocalIpAddress() {
+        try {
+            for (Enumeration<NetworkInterface> en = NetworkInterface.getNetworkInterfaces(); en.hasMoreElements(); ) {
+                NetworkInterface intf = en.nextElement();
+                for (Enumeration<InetAddress> enumIpAddr = intf.getInetAddresses(); enumIpAddr.hasMoreElements(); ) {
+                    InetAddress inetAddress = enumIpAddr.nextElement();
+                    if (!inetAddress.isLoopbackAddress() && inetAddress instanceof Inet4Address) {
+                        return inetAddress.getHostAddress();
+                    }
+                }
+            }
+        } catch (SocketException ex) {
+            ex.printStackTrace();
         }
         return null;
     }
+
 
     void closeExistingServerSocket() {
         try {
@@ -119,7 +132,7 @@ class YModemTCPServer {
                         try {
                             sock.setReuseAddress(true);
                             sock.bind(new InetSocketAddress("0.0.0.0", PORT));  // 외부 접근 허용
-                            Log.d("YModemTCPServer", "[O] Port binding successful");
+                            logMessage("[O] Port binding successful");
                         } catch (IOException e) {
                             logMessage("[X] Port binding failed: " + e.getMessage());
                             Log.e("YModemTCPServer", "Port binding failed: " + e.getMessage());
@@ -128,7 +141,7 @@ class YModemTCPServer {
 
                         logMessage("                                                          ");
                         logMessage("==========================================================");
-                        logMessage("Server started on ip: " + getWifiIp(context));
+                        logMessage("Server started on ip: " + getLocalIpAddress());
                         logMessage("Server started on port: " + PORT);
 
                         while (true) {
