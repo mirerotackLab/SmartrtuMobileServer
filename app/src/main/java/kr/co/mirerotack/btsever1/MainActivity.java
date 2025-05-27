@@ -69,7 +69,6 @@ public class MainActivity extends AppCompatActivity {
         registerReceiver(receiver, new IntentFilter("BT_SERVER_MESSAGE"));
 
         Button btnStartServer = findViewById(R.id.btnStartServer);
-        Button btnSendData = findViewById(R.id.btnSendData);
 
         btnStartServer.setOnClickListener(new View.OnClickListener() {
             @Override

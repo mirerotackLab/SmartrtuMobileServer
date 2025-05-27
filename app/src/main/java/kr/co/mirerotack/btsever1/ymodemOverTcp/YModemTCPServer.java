@@ -28,6 +28,8 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketException;
 import java.net.SocketTimeoutException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.Enumeration;
 
 import kr.co.mirerotack.btsever1.RtuSnapshot;
@@ -69,6 +71,7 @@ class YModemTCPServer {
     private String PackageBasePath = "kr.co.mirerotack";
     private String NEW_APK_FILE_NAME = "firmware.apk";
     private String TAG = "YmodemTcpServer";
+    private static final String dataFileName = "RtuStatus.json";
     private Context context;
 
     private int errorCount = 0;
@@ -253,7 +256,7 @@ class YModemTCPServer {
 
             if(yModem.getIsSyncDataMode()) {
                 logMessage("handleSyncDataMode Start");
-                syncData(inputStream, outputStream);
+                syncData(context, inputStream, outputStream);
 
                 return;
             }
@@ -337,15 +340,40 @@ class YModemTCPServer {
         }
     }
 
-    private boolean syncData(InputStream inputStream, OutputStream outputStream) throws IOException {
+    private boolean syncData(Context context, InputStream inputStream, OutputStream outputStream) throws IOException {
         try {
-            RtuSnapshot dummyData = createDummyData();
+            RtuSnapshot snapshot;
             Gson gson = new Gson();
-            String jsonData = gson.toJson(dummyData);
+
+            // 1. JSON 파일 존재 여부 확인 및 로드
+            File file = new File(context.getFilesDir(), dataFileName);
+            logMessage("불러올 Json 파일 절대 경로 : " + file.getAbsolutePath());
+            logMessage("불러올 Json 파일 존재 여부 : " + file.exists());
+
+            if (file.exists()) {
+                StringBuilder builder = new StringBuilder();
+                BufferedReader reader = new BufferedReader(new InputStreamReader(new FileInputStream(file), "UTF-8"));
+                String line;
+                while ((line = reader.readLine()) != null) {
+                    builder.append(line);
+                }
+                reader.close();
+
+                String jsonString = builder.toString();
+                snapshot = gson.fromJson(jsonString, RtuSnapshot.class);
+                logMessage("8-0. [RX] 센서 데이터: 파일에서 로드됨");
+            } else {
+                logMessage("8-0. [RX] RtuStatus.json 파일 없음, 더미 데이터로 대체");
+                snapshot = createDummyData();
+            }
+
+            // 2. 직렬화 후 전송
+            String jsonData = gson.toJson(snapshot);
             byte[] dataBytes = jsonData.getBytes("UTF-8");
 
             outputStream.write(dataBytes);
             outputStream.flush();
+
             logMessage("8-1. [RX] 센서 데이터 전송 성공");
             return true;
         } catch (IOException e) {
