@@ -1,10 +1,10 @@
 {
     "timestamp": "2025-05-02T15:30:45.123Z",
-    "aiStatus": true,
-    "aoStatus": true,
-    "ethernetStatus": true,
-    "serialStatus": true,
     "satelliteRemoteControlStatus": true,
+    "ethernetStatus": false,
+    "serialStatus": true,
+    "aiStatus": false,
+    "aoStatus": true,
 
     "doorOpen": false,
     "powerAvailable": true,

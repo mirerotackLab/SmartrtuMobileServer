@@ -208,13 +208,6 @@ public class BluetoothServerService extends Service {
 
                         Log.d(TAG, "수신된 메시지: " + receivedMessage);
                         sendMessageToUI("수신된 메시지: " + receivedMessage);
-
-
-
-                        // GET_RTU_DATA 명령이면 센서 데이터 전송
-                        if ("GET_RTU_DATA".equals(receivedMessage.trim())) {
-                            sendSensorDataWithModbusRTU();
-                        }
                     }
                 } catch (IOException e) {
                     Log.e(TAG, "데이터 수신 중 오류", e);
@@ -258,101 +251,6 @@ public class BluetoothServerService extends Service {
         }
     }
 
-    /**
-     * UI에서 호출하는 센서 데이터 전송 메서드
-     */
-    public boolean sendSensorData() {
-        synchronized (this) {
-            if (!isConnected || connectedThread == null) {
-                sendMessageToUI("센서 데이터 전송 실패 (연결 안 됨)");
-                Log.e(TAG, "연결 안 됨");
-                return false;
-            }
-        }
-
-        return sendSensorDataWithModbusRTU();
-    }
-
-    /**
-     * Modbus RTU 프로토콜을 사용하여 센서 데이터를 전송하는 메서드
-     */
-    private boolean sendSensorDataWithModbusRTU() {
-        synchronized (this) {
-            if (!isConnected || connectedThread == null) {
-                return false;
-            }
-        }
-
-        try {
-            OutputStream outputStream = clientSocket.getOutputStream();
-            RtuSnapshot dummyData = createDummyData();
-            Gson gson = new Gson();
-            String jsonData = gson.toJson(dummyData);
-            byte[] dataBytes = jsonData.getBytes("UTF-8");
-
-            outputStream.write(dataBytes);
-            outputStream.flush();
-            sendMessageToUI("센서 데이터 전송 성공");
-            return true;
-        } catch (IOException e) {
-            sendMessageToUI("센서 데이터 전송 실패 (IOException)");
-            return false;
-        }
-    }
-
-    /**
-     * Modbus RTU CRC-16 계산 메서드
-     * @param buffer 데이터 버퍼
-     * @param offset 시작 오프셋
-     * @param length 계산할 길이
-     * @return 계산된 CRC-16 값
-     */
-    private int calculateModbusCRC(byte[] buffer, int offset, int length) {
-        int crc = 0xFFFF; // CRC 초기값
-
-        for (int i = offset; i < offset + length; i++) {
-            crc ^= (buffer[i] & 0xFF);
-
-            for (int j = 0; j < 8; j++) {
-                if ((crc & 0x0001) != 0) {
-                    crc = (crc >>> 1) ^ 0xA001; // 부호 없는 시프트로 변경
-                } else {
-                    crc = crc >>> 1; // 부호 없는 시프트로 변경
-                }
-            }
-        }
-
-        return crc;
-    }
-
-    /**
-     * 연결 오류 처리
-     */
-    private void handleConnectionError() {
-        synchronized (this) {
-            isConnected = false;
-
-            // 현재 연결 스레드 종료
-            if (connectedThread != null) {
-                connectedThread.cancel();
-                connectedThread = null;
-            }
-
-            // 소켓 닫기
-            try {
-                if (clientSocket != null) {
-                    clientSocket.close();
-                    clientSocket = null;
-                }
-            } catch (IOException e) {
-                Log.e(TAG, "소켓 닫기 실패", e);
-            }
-
-            // AcceptThread 재시작
-            startAcceptThread();
-        }
-    }
-
     public static RtuSnapshot createDummyData() {
         RtuSnapshot rtuSnapshot = new RtuSnapshot();
 
@@ -361,31 +259,31 @@ public class BluetoothServerService extends Service {
         String isoTimestamp = isoFormat.format(new Date());
         rtuSnapshot.timestamp = isoTimestamp;
 
+        rtuSnapshot.satelliteRemoteControlStatus = false;
+        rtuSnapshot.ethernetStatus = true;
+        rtuSnapshot.serialStatus = false;
         rtuSnapshot.aiStatus = true;
         rtuSnapshot.aoStatus = false;
-        rtuSnapshot.ethernetStatus = true;
-        rtuSnapshot.serialStatus = true;
-        rtuSnapshot.satelliteRemoteControlStatus = false;
 
         rtuSnapshot.doorOpen = false;
         rtuSnapshot.powerAvailable = true;
 
-        rtuSnapshot.waterLevel = 100.0;
+        rtuSnapshot.waterLevel = 100.5;
         rtuSnapshot.waterLevel2 = 101.5;
         rtuSnapshot.rainFall = 10.2;
-        rtuSnapshot.batteryVoltage = 12.7;
+        rtuSnapshot.batteryVoltage = 120.8;
 
         rtuSnapshot.rtuId = "1";
         rtuSnapshot.groupId = "1";
         rtuSnapshot.damCode = "1234567";
 
         rtuSnapshot.eth0UserType = true;
-        rtuSnapshot.eth0IpAddress = "192.168.0.10";
+        rtuSnapshot.eth0IpAddress = "192.168.0.137";
         rtuSnapshot.eth0SubnetMask = "255.255.255.0";
         rtuSnapshot.eth0Gateway = "192.168.0.1";
 
         rtuSnapshot.eth1UserType = true;
-        rtuSnapshot.eth1IpAddress = "192.168.0.11";
+        rtuSnapshot.eth1IpAddress = "192.168.0.135";
         rtuSnapshot.eth1SubnetMask = "255.255.255.0";
         rtuSnapshot.eth1Gateway = "192.168.0.1";
 

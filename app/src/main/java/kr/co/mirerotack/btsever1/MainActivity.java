@@ -83,15 +83,6 @@ public class MainActivity extends AppCompatActivity {
                 startBluetoothServer(); // 권한이 있으면, 블루투스 서버 시작 메서드 호출
             }
         });
-
-        btnSendData.setOnClickListener(new View.OnClickListener() {
-            @Override
-            public void onClick(View v) {
-            if (isBound && bluetoothServerService != null) {
-                bluetoothServerService.sendSensorData(); // ✅ 데이터 전송
-            }
-            }
-        });
     }
 
     @Override

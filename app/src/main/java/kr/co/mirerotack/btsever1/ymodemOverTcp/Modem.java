@@ -80,29 +80,27 @@ public class Modem {
     /**
      * Request transmission start and return first byte of "first" block from sender (block 1 for XModem, block 0 for YModem)
      *
-     * @param useCRC16
      * @return
      * @throws IOException
      */
-    protected int requestTransmissionStart(boolean useCRC16) throws IOException {
+    protected int requestTransmissionStart() throws IOException, TimeoutException {
         int character;
         int errorCount = 0; // 오류 횟수 카운트
-        byte requestStartByte;
 
-        // 📌 1. CRC 방식 선택
-        if (!useCRC16) {
-            requestStartByte = NAK; // 기본 체크섬 요청 (8-bit)
-        } else {
-            requestStartByte = START_ACK; // CRC16 요청 ('C' = 0x43)
-        }
-
-        // 📌 2. 송신자의 첫 번째 데이터 블록 수신 대기
+        // 1. 송신자의 첫 번째 데이터 블록 수신 대기
         Timer timer = new Timer(REQUEST_TIMEOUT); // 타임아웃 타이머 설정
 
         while (errorCount < MAXERRORS) {
             // 📤 전송 시작 요청 (송신자가 응답할 때까지 반복 전송)
-            sendByte(requestStartByte);
+            sendByte(START_ACK);
+            logMessage("1-1. [TX] C");
+
             timer.start(); // 타이머 시작
+
+            character = readByte(timer); // 📥 송신자로부터 응답 수신
+            if (character == 'C') {
+                logMessage("2-2. [RX] C");
+            }
 
             try {
                 while (true) {
@@ -119,7 +117,7 @@ public class Modem {
             }
         }
 
-        // 📌 최대 재시도 횟수를 초과하면 전송 실패 처리
+        // 2. 최대 재시도 횟수를 초과하면 전송 실패 처리
         interruptTransmission();
         throw new RuntimeException("Timeout, no data received from transmitter");
     }

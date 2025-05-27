@@ -171,7 +171,6 @@ class YModemTCPServer {
                                 }
                                 logMessage("--------------------2. Waiting for socket---------------------");
                                 socket = sock.accept();      // 새로운 클라이언트 요청이 들어올 때까지 블로킹
-                                socket.setSoTimeout(5000); // 5초 타임아웃 설정
 
                                 logMessage("--------------------3. Starting to receive--------------------");
                                 configureSocket(socket);     // 송수신 버퍼 크기 및 타임아웃 설정
@@ -210,33 +209,6 @@ class YModemTCPServer {
         }).start();
     }
 
-    synchronized public static int SysCommand(String cmd) {
-
-        int result = 0;
-
-        try {
-            Process proc = Runtime.getRuntime().exec(cmd);
-            proc.waitFor();
-            result = proc.exitValue();
-
-            for (int i = 0; i < 5; i++) {
-                System.out.println("exitValue : " + result);
-                if (result != 0) {
-                    proc = Runtime.getRuntime().exec(cmd);
-                    proc.waitFor();
-                    result = proc.exitValue();
-                    Thread.sleep(1000);
-                } else {
-                    break;
-                }
-            }
-            return result;
-        } catch (Exception e) {
-            e.printStackTrace();
-            return result;
-        }
-    }
-
     private void configureSocket(Socket socket) throws IOException {
         // ✅ Nagle 알고리즘 비활성화 → 작은 패킷도 즉시 전송 -> 지연(Latency) 최소화 (빠른 응답)
         // ❗ 단점: 네트워크 혼잡이 발생할 수 있음 (작은 패킷이 많아질 경우)
@@ -244,7 +216,7 @@ class YModemTCPServer {
 
         // ✅ 수신(Receive) 타임아웃 설정 → 클라이언트 응답이 없을 경우 지정된 시간 후 예외 발생
         // ❗ 너무 짧으면 정상적인 데이터 수신에도 영향을 줄 수 있음
-        socket.setSoTimeout(2000);
+        // socket.setSoTimeout(2000);
 
         // ✅ 송신(Send) 버퍼 크기 설정
         // - 큰 데이터 전송 시 성능 향상 가능 (버퍼가 클수록 더 많은 데이터를 한 번에 보낼 수 있음)
@@ -288,7 +260,6 @@ class YModemTCPServer {
 
             if (yModem.getIsRebootMode()) {
                 logMessage("handleRebootMode Start");
-                sendAndReceiveACK(inputStream, outputStream); // ACK 주고 받은 뒤 reboot
 
                 Process processStart = Runtime.getRuntime().exec("ssu -c reboot");
                 processStart.waitFor();
@@ -355,12 +326,6 @@ class YModemTCPServer {
             handleError(e);
         } finally {
             try {
-                sendLogFileToClient(socket); // 로그 파일 전송
-            } catch (IOException e) {
-                logMessage("IOException" + e.getMessage());
-            }
-
-            try {
                 if (inputStream != null) inputStream.close();
                 if (outputStream != null) outputStream.close();
                 if (socket != null && !socket.isClosed()) {
@@ -369,71 +334,6 @@ class YModemTCPServer {
             } catch (IOException e) {
                 logMessage("[X] Socket close error: " + e.getMessage());
             }
-        }
-    }
-
-    /// TCP 통신이 잘 되고 있는데 연결 상태를 체크하는 모드
-    /// 통신 테스트 문자인 'T'를 송-수신 하는 것으로 통신 상태를 체크함.
-    /// 2025.04.10 PingMode는 새로 추가된 RTU Info 모드가 통신 체크 까지 수행되어 필요 없어짐
-    private void handlePingMode(InputStream inputStream, OutputStream outputStream) throws IOException {
-        logMessage("handlePingMode Start");
-        sendByte(outputStream, COM_TEST, "9-1. [TX] T");
-
-        while (true) {
-            if (receiveByte(inputStream) == COM_TEST) {
-                logMessage("9-4. [RX] T");
-                break;
-            }
-        }
-    }
-
-    /// SmartRTU 버전 정보 및 실행 상태 반환
-    /// Smartrtu ps가 활성화 되어 있는지 체크함 : 활성화 -> ACK / 비활성화 -> NAK
-    /// TX DATA : ['Version' 1] smartrtu APP Process Status :   Running  or  Not Running
-    private void handleRtuInfoMode(InputStream inputStream, OutputStream outputStream) {
-        logMessage("handleRtuInfoMode Start");
-        try {
-            // 1차 실행: kr.co.mirerotack 관련 프로세스 목록 가져오기 (apkDownloader 제외)  | grep -v 'kr.co.mirerotack.apkDownloader'
-            DetectionResult installStatus = SmartRtuUtils.detectTargetUsingShellCommand(
-        "pm list packages", PackageBasePath, context.getPackageName(), true
-            );
-
-            if (installStatus.isMatched) { // 설치되어 있는 경우
-                logMessage("App Installed : O");
-
-                int idx = installStatus.matchedLine.lastIndexOf('.');
-                if (idx == -1) {
-                    return;
-                }
-
-                String installedAppPackageName = installStatus.matchedLine.substring(idx + 1).trim(); // "smartrtu"
-
-                PackageManager pm = context.getPackageManager();
-                PackageInfo installedAppInfo = pm.getPackageInfo(PackageBasePath + "." + installedAppPackageName, 0);
-                int installedAppVersionCode = installedAppInfo.versionCode;
-
-                sendAndReceiveACK(inputStream, outputStream); // ACK 주고 받은 뒤, rtu info 데이터 전송 (버전, SmartRtu App 실행 상태)
-
-                DetectionResult smartrtuAppProcessStatus = SmartRtuUtils.detectTargetUsingShellCommand("ps", PackageBasePath,
-                        context.getPackageName().substring(context.getPackageName().lastIndexOf('.') + 1), true
-                );
-
-                String message = "[Version " + installedAppVersionCode + "] "
-                        + installedAppPackageName + " APP Process Status : "
-                        + (smartrtuAppProcessStatus.isMatched ? "Running" : "Not Running"); // 설치 상태 반환
-
-                sendBytes(outputStream, message.getBytes("UTF-8"), "9-5. [TX] " + message);
-                logMessage("Running app package: " + installedAppPackageName + ", version: " + installedAppVersionCode);
-
-            } else { // 설치되어 있지 않은 경우
-                sendByte(outputStream, NAK, "9-100. [TX] NAK, No running process related to " + PackageBasePath + " found");
-                logMessage("App Installed : X");
-                logMessage("- No running process related to " + PackageBasePath + " found");
-            }
-        } catch (IOException | InterruptedException e) {
-            e.printStackTrace();
-        } catch (PackageManager.NameNotFoundException e) {
-            throw new RuntimeException(e);
         }
     }
 
@@ -446,26 +346,11 @@ class YModemTCPServer {
 
             outputStream.write(dataBytes);
             outputStream.flush();
-            logMessage("[RX] 8-1. 센서 데이터 전송 성공, data : " + dataBytes.toString());
-
-            sendAndReceiveACK(inputStream, outputStream);
-
+            logMessage("8-1. [RX] 센서 데이터 전송 성공");
             return true;
         } catch (IOException e) {
-            logMessage("[RX] 8-100. 센서 데이터 전송 실패 (IOException), " + e.getCause() + ", " + e.getMessage());
+            logMessage("8-100. [RX] 센서 데이터 전송 실패 (IOException), " + e.getCause() + ", " + e.getMessage());
             return false;
-        }
-    }
-
-    /// ACk 주고 받기
-    private void sendAndReceiveACK(InputStream inputStream, OutputStream outputStream) throws IOException {
-        sendByte(outputStream, ACK, "9-1. [TX] ACK");
-
-        while (true) {
-            if (receiveByte(inputStream) == ACK) {
-                logMessage("9-4. [RX] ACK");
-                break;
-            }
         }
     }
 
@@ -518,62 +403,6 @@ class YModemTCPServer {
         // 🔹 기타 오류 발생 시에는 재시작 처리
         logMessage("[X] Unhandled error occurred. Restarting server socket.");
         closeExistingServerSocket();
-    }
-
-    public void sendLogFileToClient(Socket socket) throws IOException {
-        File logFile = null;
-        FileInputStream fis = null;
-
-        try {
-            if (socket.isClosed()) {
-                logMessage("Socket is closed. Log file will not be sent.");
-                return;
-            }
-
-            logFile = new File(getLogFilePath());
-
-            // 전송에 성공해서 제거된 경우
-            if (!logFile.exists()) {
-                logMessage("Log file does not exist, attempting to recreate it: " + logFile.getAbsolutePath());
-
-            }
-
-            logMessage("Starting log file transfer: " + logFile.getAbsolutePath());
-
-            fis = new FileInputStream(logFile);
-            OutputStream outputStream = socket.getOutputStream();
-            byte[] buffer = new byte[1024];
-            int bytesRead;
-
-            while ((bytesRead = fis.read(buffer)) != -1) {
-                outputStream.write(buffer, 0, bytesRead);
-                outputStream.flush();
-            }
-
-            fis.close();
-            logMessage("[O] Log file transfer completed");
-        } catch (IOException e) {
-            logMessage("[X] Error occurred during log file transfer: " + e.getMessage());
-        } finally {
-            waitSeconds(1000);
-
-            if (logFile != null && logFile.exists()) {
-                // FileWriter와 PrintWriter를 null로 초기화 시켜서 initLogFile()가 수행되도록 init
-                initFileWriter();
-                initPrintWriter();
-                logFile.delete();
-                logMessage("[O] Log file deleted and Writer reset successfully");
-            }
-
-            if (fis != null) {
-                try {
-                    fis.close();
-                } catch (IOException e) { /* 무시 가능 */ }
-            }
-
-            socket.close();
-            logMessage("8. Socket closed");
-        }
     }
 
     public void rebootDevice() {
