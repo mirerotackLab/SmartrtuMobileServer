@@ -14,6 +14,7 @@ import com.google.gson.Gson;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.lang.reflect.Method;
 import java.text.SimpleDateFormat;
 import java.util.Arrays;
 import java.util.Date;
@@ -82,10 +83,37 @@ public class BluetoothServerService extends Service {
                 Log.e(TAG, "Bluetooth 어댑터를 찾을 수 없음");
                 return;
             }
+
+            bluetoothAdapter.enable();
+            int waitTime = 0;
+            while (!bluetoothAdapter.isEnabled() && waitTime < 20000) {
+                try {
+                    Log.e(TAG, "bluetoothAdapter.isEnabled() is false, waitTime: " + waitTime + "ms");
+                    Thread.sleep(500);
+                } catch (InterruptedException e) {
+                    throw new RuntimeException(e);
+                }
+                waitTime += 500;
+            }
+
             if (!bluetoothAdapter.isEnabled()) {
                 sendMessageToUI("Bluetooth 꺼져 있음");
                 Log.e(TAG, "Bluetooth가 꺼져 있음");
-                return;
+
+                try {
+                    Method enableMethod = BluetoothAdapter.class.getMethod("enable");
+                    enableMethod.setAccessible(true);
+                    boolean success = (boolean) enableMethod.invoke(BluetoothAdapter.getDefaultAdapter());
+                    Log.d("Bluetooth", "enable() called: " + success);
+                } catch (Exception e) {
+                    Log.e("Bluetooth", "Reflection failed", e);
+                }
+
+                if (!bluetoothAdapter.isEnabled()) {
+                    sendMessageToUI("Bluetooth 꺼져 있음22");
+                    Log.e(TAG, "Bluetooth가 꺼져 있음22");
+                }
+                // return;
             }
 
             // 연결된 페어링 장치 로깅
@@ -107,7 +135,7 @@ public class BluetoothServerService extends Service {
                     }
 
                     // 새 서버 소켓 생성
-                    serverSocket = bluetoothAdapter.listenUsingRfcommWithServiceRecord(SERVICE_NAME, SERVICE_UUID);
+                    serverSocket = bluetoothAdapter.listenUsingInsecureRfcommWithServiceRecord(SERVICE_NAME, SERVICE_UUID);
                     sendMessageToUI("서버 소켓 생성 성공, 연결 대기 중...");
                     Log.d(TAG, "서버 소켓 생성 성공, 연결 대기 중...");
 
@@ -144,7 +172,7 @@ public class BluetoothServerService extends Service {
 
                         // 잠시 대기 후 재시도
                         try {
-                            Thread.sleep(3000);
+                            Thread.sleep(60000);
                         } catch (InterruptedException ie) {
                             Thread.currentThread().interrupt();
                             running = false;

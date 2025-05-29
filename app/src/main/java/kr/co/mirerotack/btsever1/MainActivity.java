@@ -31,6 +31,15 @@ public class MainActivity extends AppCompatActivity {
 
     private static final int REQUEST_BT_PERMISSIONS = 100;
 
+    static {
+        System.loadLibrary("MyJniLib");  // libMyJniLib.so 와 일치해야 함
+    }
+
+
+    public class NativeBtServer {
+        public native int startBluetoothServer();  // JNI 연결되는 함수
+    }
+
     // ✅ 브로드캐스트 수신기
     private final BroadcastReceiver receiver = new BroadcastReceiver() {
         @Override
@@ -61,7 +70,21 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        initTCP();
+//        initTCP();
+
+        NativeBtServer server = new NativeBtServer();
+
+        new Thread(() -> {
+            server.startBluetoothServer();  // JNI 호출
+            Log.d("NativeBT", "서버 결과: ");
+        }).start();
+
+//        if (result == 0) {
+//            Log.i("JNI", "Bluetooth 서버 시작 성공");
+//        } else {
+//            Log.e("JNI", "Bluetooth 서버 시작 실패: " + result);
+//        }
+
 
         txtStatus = findViewById(R.id.txtStatus);
 
@@ -73,13 +96,13 @@ public class MainActivity extends AppCompatActivity {
         btnStartServer.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-                // 권한 체크 후 권한이 없으면 요청하고 중단
-                if (!checkBluetoothPermissions()) {
-                    txtStatus.setText("블루투스 권한 요청 중...");
-                    return; // 권한 요청은 onRequestPermissionsResult에서 처리
-                }
+            // 권한 체크 후 권한이 없으면 요청하고 중단
+            if (!checkBluetoothPermissions()) {
+                txtStatus.setText("블루투스 권한 요청 중...");
+                return; // 권한 요청은 onRequestPermissionsResult에서 처리
+            }
 
-                startBluetoothServer(); // 권한이 있으면, 블루투스 서버 시작 메서드 호출
+            startBluetoothServer1(); // 권한이 있으면, 블루투스 서버 시작 메서드 호출
             }
         });
     }
@@ -157,7 +180,7 @@ public class MainActivity extends AppCompatActivity {
             }
 
             if (allGranted) { // 모든 권한이 승인되면 서버 시작
-                startBluetoothServer();
+                startBluetoothServer1();
             } else {
                 txtStatus.setText("블루투스 권한 필요. 설정에서 허용해주세요.");
             }
@@ -165,7 +188,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     // ✅ 블루투스 서버 시작 로직
-    private void startBluetoothServer() {
+    private void startBluetoothServer1() {
         // 블루투스 어댑터 확인
         BluetoothAdapter bluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
 
@@ -180,9 +203,6 @@ public class MainActivity extends AppCompatActivity {
             } else {
                 txtStatus.setText("[X] Bluetooth Status is OFF.....");
             }
-
-
-            return;
         } else {
             txtStatus.setText("[O] Bluetooth Status is ON");
         }

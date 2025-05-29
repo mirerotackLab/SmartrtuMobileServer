@@ -214,7 +214,7 @@ class Logger {
     }
 
     // ✅ 현재 시간을 "yyyy-MM-dd HH:mm:ss.SSS" 형식으로 변환 (한국 시간 기준)
-    private static String getCurrentTimestamp() {
+    static String getCurrentTimestamp() {
         SimpleDateFormat sdf = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS");
         // sdf.setTimeZone(TimeZone.getTimeZone("Asia/Seoul"));  // ✅ 한국 시간(KST) 적용
         return sdf.format(new Date());

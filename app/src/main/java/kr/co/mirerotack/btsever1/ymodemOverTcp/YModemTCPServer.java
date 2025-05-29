@@ -3,11 +3,8 @@ package kr.co.mirerotack.btsever1.ymodemOverTcp;
 import android.content.Context;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
-import android.net.wifi.WifiInfo;
-import android.net.wifi.WifiManager;
 import android.os.Handler;
 import android.os.Looper;
-import android.text.format.Formatter;
 import android.util.Log;
 
 import com.google.gson.Gson;
@@ -15,6 +12,7 @@ import com.google.gson.Gson;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
@@ -28,16 +26,13 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketException;
 import java.net.SocketTimeoutException;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.Enumeration;
 
 import kr.co.mirerotack.btsever1.RtuSnapshot;
 
 import static kr.co.mirerotack.btsever1.BluetoothServerService.createDummyData;
-import static kr.co.mirerotack.btsever1.ymodemOverTcp.Logger.getLogFilePath;
-import static kr.co.mirerotack.btsever1.ymodemOverTcp.Logger.initFileWriter;
-import static kr.co.mirerotack.btsever1.ymodemOverTcp.Logger.initPrintWriter;
+import static kr.co.mirerotack.btsever1.ymodemOverTcp.Logger.getCurrentTimestamp;
 import static kr.co.mirerotack.btsever1.ymodemOverTcp.Logger.logMessage;
 
 /**
@@ -76,6 +71,7 @@ class YModemTCPServer {
 
     private int errorCount = 0;
     Handler handler = new Handler(Looper.getMainLooper());
+    Gson gson = new Gson();
 
     public YModemTCPServer(File filesDir, Context context) {
         this.APK_PATH = filesDir;
@@ -343,43 +339,72 @@ class YModemTCPServer {
     private boolean syncData(Context context, InputStream inputStream, OutputStream outputStream) throws IOException {
         try {
             RtuSnapshot snapshot;
-            Gson gson = new Gson();
 
             // 1. JSON 파일 존재 여부 확인 및 로드
             File file = new File(context.getFilesDir(), dataFileName);
+
+            // ex. /data/data/kr.co.mirerotack.btsever1/files/RtuStatus.json
             logMessage("불러올 Json 파일 절대 경로 : " + file.getAbsolutePath());
             logMessage("불러올 Json 파일 존재 여부 : " + file.exists());
 
             if (file.exists()) {
-                StringBuilder builder = new StringBuilder();
-                BufferedReader reader = new BufferedReader(new InputStreamReader(new FileInputStream(file), "UTF-8"));
-                String line;
-                while ((line = reader.readLine()) != null) {
-                    builder.append(line);
-                }
-                reader.close();
+                // 1. JSON 파싱
+                String jsonString = readJsonFile(file);
 
-                String jsonString = builder.toString();
                 snapshot = gson.fromJson(jsonString, RtuSnapshot.class);
                 logMessage("8-0. [RX] 센서 데이터: 파일에서 로드됨");
+
+                // 2. timestamp 현재 시간으로 갱신
+                snapshot.timestamp = getCurrentTimestamp();
+
+                // 3. JSON 파일에 다시 저장 (timestamp 반영)
+                updateTimestampToFile(context, snapshot);
+
+                logMessage("8-0. [RX] JSON 파일에 timestamp 갱신됨");
             } else {
+                // 4. 파일이 없으면 더미 데이터 생성 후 파일로 저장
                 logMessage("8-0. [RX] RtuStatus.json 파일 없음, 더미 데이터로 대체");
                 snapshot = createDummyData();
+                snapshot.timestamp = getCurrentTimestamp();
+
+                updateTimestampToFile(context, snapshot);
+                logMessage("8-0. [RX] 더미 JSON 파일 생성됨");
             }
 
-            // 2. 직렬화 후 전송
-            String jsonData = gson.toJson(snapshot);
-            byte[] dataBytes = jsonData.getBytes("UTF-8");
+            // 5. 최종적으로 파일 다시 읽어서 전송
+            String finalJson = readJsonFile(file);
+            byte[] dataBytes = finalJson.getBytes("UTF-8");
 
             outputStream.write(dataBytes);
             outputStream.flush();
 
             logMessage("8-1. [RX] 센서 데이터 전송 성공");
             return true;
+
         } catch (IOException e) {
             logMessage("8-100. [RX] 센서 데이터 전송 실패 (IOException), " + e.getCause() + ", " + e.getMessage());
             return false;
         }
+    }
+
+    private void updateTimestampToFile(Context context, RtuSnapshot snapshot) throws IOException {
+        File file = new File(context.getFilesDir(), dataFileName);
+        String json = gson.toJson(snapshot);
+
+        FileOutputStream fos = new FileOutputStream(file, false);  // 덮어쓰기 모드
+        fos.write(json.getBytes("UTF-8"));
+        fos.close();
+    }
+
+    private String readJsonFile(File file) throws IOException {
+        StringBuilder builder = new StringBuilder();
+        BufferedReader reader = new BufferedReader(new InputStreamReader(new FileInputStream(file), "UTF-8"));
+        String line;
+        while ((line = reader.readLine()) != null) {
+            builder.append(line);
+        }
+        reader.close();
+        return builder.toString();
     }
 
     private void closeSocket() {

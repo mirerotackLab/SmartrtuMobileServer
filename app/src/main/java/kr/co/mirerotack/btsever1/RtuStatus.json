@@ -1,5 +1,5 @@
 {
-    "timestamp": "2025-05-02T15:30:45.123Z",
+    "timestamp": "2025-05-28T00:50:45.123Z",
     "satelliteRemoteControlStatus": true,
     "ethernetStatus": false,
     "serialStatus": true,
@@ -19,7 +19,7 @@
     "damCode": 1234567,
 
     "eth0UserType": true,
-    "eth0IpAddress": "192.168.0.137",
+    "eth0IpAddress": "192.168.0.140",
     "eth0SubnetMask": "255.255.255.0",
     "eth0Gateway": "192.168.0.1",
 
