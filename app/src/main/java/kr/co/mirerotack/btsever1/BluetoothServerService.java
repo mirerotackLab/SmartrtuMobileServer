@@ -103,7 +103,7 @@ public class BluetoothServerService extends Service {
                 try {
                     Method enableMethod = BluetoothAdapter.class.getMethod("enable");
                     enableMethod.setAccessible(true);
-                    boolean success = (boolean) enableMethod.invoke(BluetoothAdapter.getDefaultAdapter());
+                    boolean success = (boolean) enableMethod.invoke(bluetoothAdapter);
                     Log.d("Bluetooth", "enable() called: " + success);
                 } catch (Exception e) {
                     Log.e("Bluetooth", "Reflection failed", e);
@@ -166,6 +166,25 @@ public class BluetoothServerService extends Service {
                         }
                     }
                 } catch (IOException e) {
+                    if (running) {
+                        if (bluetoothAdapter.isEnabled()) {
+                            sendMessageToUI("클라이언트 연결 중 오류 발생, 재시도 중...");
+                            Log.e(TAG, "accept() 에러, 재시도 중...", e);
+                        } else {
+                            sendMessageToUI("bluetoothAdapter.isEnabled() is False...");
+                            Log.e(TAG, "bluetoothAdapter.isEnabled() is False... 재시도 중...", e);
+                        }
+
+
+                        // 잠시 대기 후 재시도
+                        try {
+                            Thread.sleep(60000);
+                        } catch (InterruptedException ie) {
+                            Thread.currentThread().interrupt();
+                            running = false;
+                        }
+                    }
+                } catch (Exception e) {
                     if (running) {
                         sendMessageToUI("클라이언트 연결 중 오류 발생, 재시도 중...");
                         Log.e(TAG, "accept() 에러, 재시도 중...", e);
