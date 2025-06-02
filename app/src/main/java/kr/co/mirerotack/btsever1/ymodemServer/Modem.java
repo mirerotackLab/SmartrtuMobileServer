@@ -1,4 +1,4 @@
-package kr.co.mirerotack.btsever1.ymodemOverTcp;
+package kr.co.mirerotack.btsever1.ymodemServer;
 
 import android.util.Log;
 
@@ -6,7 +6,12 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 
-import static kr.co.mirerotack.btsever1.ymodemOverTcp.Logger.logMessage;
+import kr.co.mirerotack.btsever1.utils.Logger;
+import kr.co.mirerotack.btsever1.utils.TimeoutException;
+import kr.co.mirerotack.btsever1.utils.Timer;
+import kr.co.mirerotack.btsever1.utils.YModemCRC16;
+
+import static kr.co.mirerotack.btsever1.utils.Logger.logMessage;
 
 /**
  * This is core Modem class supporting XModem (and some extensions XModem-1K, XModem-CRC), and YModem.<br/>
@@ -18,10 +23,9 @@ import static kr.co.mirerotack.btsever1.ymodemOverTcp.Logger.logMessage;
  */
 public class Modem {
 
-    /* Protocol characters used */
     protected static final byte SOH = 0x01; /* Start Of Header 128바이트 패킷 시작 */
     protected static final byte STX = 0x02; /* Start Of Text 1024바이트 패킷 시작 */
-    protected static final byte EOT = 0x04; /* 전송 종료n */
+    public static final byte EOT = 0x04; /* 전송 종료n */
     protected static final byte ACK = 0x06; /* 수신 확인 */
     protected static final byte NAK = 0x15; /* 오류 발생 */
     protected static final byte CAN = 0x18; /* 취소? */
@@ -62,12 +66,15 @@ public class Modem {
     public void resetBlockNumber() {
         this.blockNumber = 0;
     }
+
     public int getBlockNumber() {
         return blockNumber;
     }
+
     public void incrementBlockNumber() { // 일반적
         blockNumber = (blockNumber + 1) % 256;  // ✅ 8비트 순환 유지
     }
+
     public void reduceBlockNumber() { // CRC 오류로 인해 재송신이 필요할 때,
         blockNumber = (blockNumber - 1) % 256;  // ✅ 8비트 순환 유지
     }
@@ -174,15 +181,16 @@ public class Modem {
 
     /**
      * YModem 프로토콜에서 하나의 데이터 블록을 읽는 함수
-     * @param blockNumber   현재 읽어야 할 블록 번호 (0부터 시작)
-     * @param shortBlock    128바이트(SOH) 또는 1024바이트(STX) 블록 여부, 사실상 isHeader와 값동일
-     * @param YModemCrc16           CRC16 체크 방식
-     * @return              수신된 데이터 블록 (byte 배열)
-     * @throws IOException  입출력 예외 발생 시
-     * @throws TimeoutException  타임아웃 발생 시
-     * @throws RepeatedBlockException  동일한 블록이 중복 수신될 경우
-     * @throws SynchronizationLostException  블록 동기화 오류 발생 시
-     * @throws InvalidBlockException  블록 데이터 오류 발생 시
+     *
+     * @param blockNumber 현재 읽어야 할 블록 번호 (0부터 시작)
+     * @param shortBlock  128바이트(SOH) 또는 1024바이트(STX) 블록 여부, 사실상 isHeader와 값동일
+     * @param YModemCrc16 CRC16 체크 방식
+     * @return 수신된 데이터 블록 (byte 배열)
+     * @throws IOException                  입출력 예외 발생 시
+     * @throws TimeoutException             타임아웃 발생 시
+     * @throws RepeatedBlockException       동일한 블록이 중복 수신될 경우
+     * @throws SynchronizationLostException 블록 동기화 오류 발생 시
+     * @throws InvalidBlockException        블록 데이터 오류 발생 시
      */
     // STX(1)는 이미 읽고 호출함 + 블록번호(1) + 블록번호 보수(1) + 데이터(1024) + CRC(2)
     protected byte[] readBlock(int blockNumber, boolean shortBlock, YModemCRC16 YModemCrc16, int packet_number, int totalPacketSize)
@@ -234,7 +242,7 @@ public class Modem {
 
         int unit = Math.max(1, (totalPacketSize + 2) / 10);
         if (packet_number % unit == 0 || packet_number + 1 == totalPacketSize) {
-            YModemUtil.logReceivedPacket(block, packet_number, totalPacketSize);
+            Logger.logReceivedPacket(block, packet_number, totalPacketSize);
         }
 
         // 📌 5. CRC 검증 (데이터 무결성 확인)
@@ -285,7 +293,7 @@ public class Modem {
      * 지정한 길이만큼 데이터를 InputStream에서 모두 읽어올 때까지 반복 수행합니다.
      * InputStream.read()는 요청한 바이트 수만큼 항상 읽지 않기 때문에, 전체 데이터를 확보할 때 필요합니다.
      *
-     * @param in InputStream (데이터를 읽을 대상)
+     * @param in     InputStream (데이터를 읽을 대상)
      * @param buffer 데이터를 저장할 배열
      * @param offset 읽기 시작 위치
      * @param length 읽어야 할 총 바이트 수
@@ -306,11 +314,13 @@ public class Modem {
             super(errorMsg);
         }
     }
+
     static class SynchronizationLostException extends Exception {
         public SynchronizationLostException(String errorMsg) {
             super(errorMsg);
         }
     }
+
     static class InvalidBlockException extends Exception {
         public InvalidBlockException(String errorMsg) {
             super(errorMsg);

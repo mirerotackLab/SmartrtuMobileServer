@@ -1,4 +1,4 @@
-package kr.co.mirerotack.btsever1.ymodemOverTcp;
+package kr.co.mirerotack.btsever1.model;
 
 public class ApkValidationResult {
     private boolean isUpdate;
@@ -28,8 +28,19 @@ public class ApkValidationResult {
     }
 
     // ✅ Getter & Setter
-    public boolean getIsUpdate() { return isUpdate; }
-    public String getComment() { return comment; }
-    public InstallResult getInstallCode() {  return installCode; }
-    public UninstallResult getUninstallCode() { return uninstallCode; }
+    public boolean getIsUpdate() {
+        return isUpdate;
+    }
+
+    public String getComment() {
+        return comment;
+    }
+
+    public InstallResult getInstallCode() {
+        return installCode;
+    }
+
+    public UninstallResult getUninstallCode() {
+        return uninstallCode;
+    }
 }

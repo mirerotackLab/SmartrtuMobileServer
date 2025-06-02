@@ -1,4 +1,4 @@
-package kr.co.mirerotack.btsever1.ymodemOverTcp;
+package kr.co.mirerotack.btsever1.ymodemServer;
 
 import android.net.Uri;
 
@@ -14,8 +14,10 @@ import java.nio.charset.Charset;
 import java.util.Arrays;
 
 import kr.co.mirerotack.btsever1.MainActivity;
+import kr.co.mirerotack.btsever1.utils.TimeoutException;
+import kr.co.mirerotack.btsever1.utils.YModemCRC16;
 
-import static kr.co.mirerotack.btsever1.ymodemOverTcp.Logger.logMessage;
+import static kr.co.mirerotack.btsever1.utils.Logger.logMessage;
 
 public class YModem {
     private Modem modem;
@@ -23,9 +25,11 @@ public class YModem {
     private static final String TAG = "TCPCOM"; // 로그 태그
 
     private String fileName = null;
+
     public String getFileName() {
         return fileName;
     }
+
     private long expectedFileSize = -1;  // 예상 파일 크기 저장 변수
     private boolean isSyncDataMode = false;
     private boolean isRebootMode = false;
@@ -35,8 +39,14 @@ public class YModem {
         return expectedFileSize;
     }
 
-    public boolean getIsSyncDataMode() { return isSyncDataMode; }
-    public boolean getIsRebootMode() { return isRebootMode; }
+    public boolean getIsSyncDataMode() {
+        return isSyncDataMode;
+    }
+
+    public boolean getIsRebootMode() {
+        return isRebootMode;
+    }
+
     public boolean getIsForceUpdateMode() {
         return isForceUpdateMode;
     }
@@ -70,7 +80,7 @@ public class YModem {
     /**
      * YModem 프로토콜을 사용하여 파일을 수신하는 주요 로직
      *
-     * @param file       저장할 파일 또는 디렉토리 경로
+     * @param file        저장할 파일 또는 디렉토리 경로
      * @param inDirectory true일 경우, 디렉토리 내부에 파일을 생성 (단일 파일 모드일 경우 false)
      * @return 저장된 파일 객체
      * @throws IOException 수신 오류 발생 시 예외 처리
@@ -108,7 +118,7 @@ public class YModem {
             }
 
             logMessage("[O] [Header] File name: " + fileName + ", Expected size: " + expectedFileSize + " bytes\n"
-                + ", SyncData Mode: " + getIsSyncDataMode() + ", Reboot Mode: " + getIsRebootMode() + ", Force update: " + getIsForceUpdateMode());
+                    + ", SyncData Mode: " + getIsSyncDataMode() + ", Reboot Mode: " + getIsRebootMode() + ", Force update: " + getIsForceUpdateMode());
 
             // 📌 파일 저장 경로 설정 (파일 생성 X, 데이터 수신 후 저장)
             if (inDirectory) {
@@ -151,7 +161,7 @@ public class YModem {
         long receivedSize = 0;
         int packet_number = 0; // 3555번째 등 디버깅에만 사용됨
 
-        try{
+        try {
             logMessage("5-0. Starting APK data reception...");
             dataOutput = new DataOutputStream(new BufferedOutputStream(new FileOutputStream(filePath)));
 
@@ -170,7 +180,7 @@ public class YModem {
                 }
 
                 byte[] dataBlock = modem.readBlock(
-                    modem.getBlockNumber(), (character == Modem.SOH), new YModemCRC16(), packet_number, totalPacketSize
+                        modem.getBlockNumber(), (character == Modem.SOH), new YModemCRC16(), packet_number, totalPacketSize
                 );
 
                 if (dataBlock == null) {

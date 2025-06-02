@@ -1,40 +1,43 @@
 {
-    "timestamp": "2025-05-28T00:50:45.123Z",
-    "satelliteRemoteControlStatus": true,
-    "ethernetStatus": false,
-    "serialStatus": true,
-    "aiStatus": false,
-    "aoStatus": true,
-
-    "doorOpen": false,
-    "powerAvailable": true,
-
-    "waterLevel": 12.3,
-    "waterLevel2": 23.4,
-    "rainFall": 345.6,
-    "batteryVoltage": 220.0,
-
-    "rtuId": 1,
-    "groupId": 1,
-    "damCode": 1234567,
-
-    "eth0UserType": true,
-    "eth0IpAddress": "192.168.0.140",
-    "eth0SubnetMask": "255.255.255.0",
-    "eth0Gateway": "192.168.0.1",
-
-    "eth1UserType": true,
-    "eth1IpAddress": "192.168.1.138",
-    "eth1SubnetMask": "255.255.255.0",
-    "eth1Gateway": "192.168.0.1",
-
-    "diData": "00000 00000 00000 00000 1 0",
-    "doData": "1 0 0 0 1 0 0 1",
-    "aiData": [3.8, 4.2, 2.5, 3.1],
-    "aoData": [3.8, 4.2, 2.5, 3.1],
-
-    "sensorAlert": false,
-    "pulsePerMm": 0.5
+  "timestamp": "2025-05-28T00:50:45.123Z",
+  "satelliteRemoteControlStatus": true,
+  "ethernetStatus": false,
+  "serialStatus": true,
+  "aiStatus": false,
+  "aoStatus": true,
+  "doorOpen": false,
+  "powerAvailable": true,
+  "waterLevel": 12.3,
+  "waterLevel2": 23.4,
+  "rainFall": 345.6,
+  "batteryVoltage": 220.0,
+  "rtuId": 1,
+  "groupId": 1,
+  "damCode": 1234567,
+  "eth0UserType": true,
+  "eth0IpAddress": "192.168.0.140",
+  "eth0SubnetMask": "255.255.255.0",
+  "eth0Gateway": "192.168.0.1",
+  "eth1UserType": true,
+  "eth1IpAddress": "192.168.1.138",
+  "eth1SubnetMask": "255.255.255.0",
+  "eth1Gateway": "192.168.0.1",
+  "diData": "00000 00000 00000 00000 1 0",
+  "doData": "1 0 0 0 1 0 0 1",
+  "aiData": [
+    3.8,
+    4.2,
+    2.5,
+    3.1
+  ],
+  "aoData": [
+    3.8,
+    4.2,
+    2.5,
+    3.1
+  ],
+  "sensorAlert": false,
+  "pulsePerMm": 0.5
 }
 
 

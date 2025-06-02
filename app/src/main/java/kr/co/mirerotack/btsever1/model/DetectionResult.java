@@ -1,4 +1,4 @@
-package kr.co.mirerotack.btsever1.ymodemOverTcp;
+package kr.co.mirerotack.btsever1.model;
 
 public class DetectionResult {
     public boolean isMatched;

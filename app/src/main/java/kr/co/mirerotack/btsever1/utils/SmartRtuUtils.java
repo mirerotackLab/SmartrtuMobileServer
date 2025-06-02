@@ -1,10 +1,12 @@
-package kr.co.mirerotack.btsever1.ymodemOverTcp;
+package kr.co.mirerotack.btsever1.utils;
 
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 
-import static kr.co.mirerotack.btsever1.ymodemOverTcp.Logger.logMessage;
+import kr.co.mirerotack.btsever1.model.DetectionResult;
+
+import static kr.co.mirerotack.btsever1.utils.Logger.logMessage;
 
 public class SmartRtuUtils {
     public static DetectionResult detectTargetUsingShellCommand(String command, String target, String nonTarget, boolean firstLineSkip) throws IOException, InterruptedException {

@@ -46,7 +46,7 @@
         android:appComponentFactory="android.support.v4.app.CoreComponentFactory">
 
         <service
-            android:name=".ymodemOverTcp.YModemTCPService"
+            android:name=".ymodemServer.YModemUnifiedService"
             android:enabled="true"
             android:exported="false" />
 

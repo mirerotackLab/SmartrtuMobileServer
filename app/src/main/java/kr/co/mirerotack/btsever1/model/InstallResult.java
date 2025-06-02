@@ -1,4 +1,4 @@
-package kr.co.mirerotack.btsever1.ymodemOverTcp;
+package kr.co.mirerotack.btsever1.model;
 
 // ✅ APK 설치 결과 코드
 public enum InstallResult {

@@ -20,7 +20,7 @@ import android.view.View;
 import android.widget.Button;
 import android.widget.TextView;
 
-import kr.co.mirerotack.btsever1.ymodemOverTcp.YModemTCPService;
+import kr.co.mirerotack.btsever1.ymodemServer.YModemUnifiedService;
 
 
 public class MainActivity extends AppCompatActivity {
@@ -90,13 +90,13 @@ public class MainActivity extends AppCompatActivity {
         btnStartServer.setOnClickListener(new View.OnClickListener() {
             @Override
             public void onClick(View v) {
-            // 권한 체크 후 권한이 없으면 요청하고 중단
-            if (!checkBluetoothPermissions()) {
-                txtStatus.setText("블루투스 권한 요청 중...");
-                return; // 권한 요청은 onRequestPermissionsResult에서 처리
-            }
+                // 권한 체크 후 권한이 없으면 요청하고 중단
+                if (!checkBluetoothPermissions()) {
+                    txtStatus.setText("블루투스 권한 요청 중...");
+                    return; // 권한 요청은 onRequestPermissionsResult에서 처리
+                }
 
-            startBluetoothServer1(); // 권한이 있으면, 블루투스 서버 시작 메서드 호출
+                startBluetoothServer1(); // 권한이 있으면, 블루투스 서버 시작 메서드 호출
             }
         });
     }
@@ -113,10 +113,10 @@ public class MainActivity extends AppCompatActivity {
 
     private void initTCP() {
         // ✅ Context를 통해 파일 디렉토리 초기화
-        YModemTCPService.initialize(getApplicationContext());
+        YModemUnifiedService.initialize(getApplicationContext());
 
         // ✅ 서비스 시작 (백그라운드에서 TCP 서버 실행)
-        startService(new Intent(this, YModemTCPService.class));
+        startService(new Intent(this, YModemUnifiedService.class));
 
         // ✅ UI 없이 바로 앱 종료
         finish();
