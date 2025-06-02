@@ -44,9 +44,9 @@ public class MainActivity extends AppCompatActivity {
     /**
      * JNI를 통한 네이티브 Bluetooth 서버 클래스 (기존 기능 유지)
      */
-//    public class NativeBtServer {
-//        public native int startBluetoothServer();  // JNI 연결되는 함수
-//    }
+    public class NativeBtServer {
+        public native int startBluetoothServer();  // JNI 연결되는 함수
+    }
 
     /**
      * YModem 서버 상태 메시지를 수신하는 브로드캐스트 리시버
@@ -70,7 +70,7 @@ public class MainActivity extends AppCompatActivity {
         initUI(); // UI 컴포넌트 초기화
 
         // JNI 네이티브 서버 시작 (기존 기능 유지)
-        // startNativeBluetoothServer();
+        startNativeBluetoothServer();
 
         // 브로드캐스트 수신 등록 (서비스에서 상태 변화를 업데이트하기 위함)
         registerReceiver(receiver, new IntentFilter("BT_SERVER_MESSAGE"));
@@ -101,14 +101,14 @@ public class MainActivity extends AppCompatActivity {
     /**
      * JNI 네이티브 Bluetooth 서버를 시작합니다 (기존 기능 유지)
      */
-//    private void startNativeBluetoothServer() {
-//        NativeBtServer server = new NativeBtServer();
-//
-//        new Thread(() -> {
-//            server.startBluetoothServer();  // JNI 호출
-//            Log.d("NativeBT", "네이티브 서버 시작 완료");
-//        }).start();
-//    }
+    private void startNativeBluetoothServer() {
+        NativeBtServer server = new NativeBtServer();
+
+        new Thread(() -> {
+            server.startBluetoothServer();  // JNI 호출
+            Log.d("NativeBT", "네이티브 서버 시작 완료");
+        }).start();
+    }
 
     /**
      * 저장된 서버 타입 설정을 로드합니다
@@ -312,28 +312,7 @@ public class MainActivity extends AppCompatActivity {
     private boolean checkBluetoothPermissions() {
         boolean allPermissionsGranted = true;
 
-        if (Build.VERSION.SDK_INT >= 31) { // Android 12 이상
-            Log.d("MainActivity", "Android 12 이상 - 새로운 Bluetooth 권한 체크");
-
-            // Android 12 이상에서 필요한 Bluetooth 권한들
-            String[] permissions = {
-                    Manifest.permission.BLUETOOTH_CONNECT,
-                    Manifest.permission.BLUETOOTH_SCAN,
-                    Manifest.permission.BLUETOOTH_ADVERTISE
-            };
-
-            for (String permission : permissions) {
-                if (ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED) {
-                    allPermissionsGranted = false;
-                    break;
-                }
-            }
-
-            if (!allPermissionsGranted) {
-                ActivityCompat.requestPermissions(this, permissions, REQUEST_BT_PERMISSIONS);
-            }
-
-        } else { // Android 11 이하
+        if (Build.VERSION.SDK_INT < 31) { // Android 11 이하
             Log.d("MainActivity", "Android 11 이하 - 기존 Bluetooth 권한 체크");
 
             // Android 11 이하에서 필요한 Bluetooth 권한들
