@@ -50,8 +50,6 @@
             android:enabled="true"
             android:exported="false" />
 
-        <service android:name=".BluetoothServerService" />
-
         <activity
             android:name=".MainActivity"
             android:exported="true">

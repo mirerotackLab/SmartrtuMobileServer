@@ -5,7 +5,6 @@ import android.content.Context;
 import java.io.File;
 
 import kr.co.mirerotack.btsever1.model.YModemServerInterface;
-import kr.co.mirerotack.btsever1.ymodemOverTcp.YModemBluetoothServerImpl;
 
 public class YModemServerFactory {
     public enum ServerType {

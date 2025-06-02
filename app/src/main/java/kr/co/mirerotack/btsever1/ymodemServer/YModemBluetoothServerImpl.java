@@ -1,153 +1,227 @@
-package kr.co.mirerotack.btsever1.ymodemOverTcp;
+package kr.co.mirerotack.btsever1.ymodemServer;
 
 import android.bluetooth.BluetoothAdapter;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothServerSocket;
 import android.bluetooth.BluetoothSocket;
 import android.content.Context;
-import android.content.pm.PackageInfo;
-import android.content.pm.PackageManager;
-import android.os.Handler;
-import android.os.Looper;
 import android.util.Log;
 
-import com.google.gson.Gson;
-
-import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.io.InputStreamReader;
 import java.io.OutputStream;
-import java.io.RandomAccessFile;
 import java.lang.reflect.Method;
 import java.util.Set;
 import java.util.UUID;
 
-import kr.co.mirerotack.btsever1.RtuSnapshot;
-import kr.co.mirerotack.btsever1.model.ApkValidationResult;
-import kr.co.mirerotack.btsever1.model.InstallResult;
-import kr.co.mirerotack.btsever1.model.UninstallResult;
-import kr.co.mirerotack.btsever1.model.YModemServerInterface;
-import kr.co.mirerotack.btsever1.ymodemServer.YModem;
-
-import static kr.co.mirerotack.btsever1.utils.DummyData.createDummyData;
-import static kr.co.mirerotack.btsever1.utils.Logger.getCurrentTimestamp;
 import static kr.co.mirerotack.btsever1.utils.Logger.logMessage;
 
 /**
- * Bluetooth 서버 구현체 - 기존 BluetoothServerService 로직을 YModem에 적용
- * 기존 TCP 서버와 동일한 YModem 프로토콜 처리 로직을 Bluetooth로 구현
+ * Bluetooth 서버 구현체 - AbstractYModemServer를 상속받아 Bluetooth 전용 로직만 구현
+ * TCP와 달리 Bluetooth는 별도 스레드(AcceptThread)를 통해 연결을 관리하며,
+ * 페어링된 장치와의 RFCOMM 통신을 담당합니다
  */
-public class YModemBluetoothServerImpl implements YModemServerInterface {
-    // YModem 프로토콜 상수들 (TCP와 동일)
-    protected static final byte SOH = 0x01; /* 128바이트 패킷 시작 */
-    protected static final byte STX = 0x02; /* 1024바이트 패킷 시작 */
-    protected static final byte EOT = 0x04; /* 전송 종료 */
-    protected static final byte ACK = 0x06; /* 수신 확인 */
-    protected static final byte NAK = 0x15; /* 오류 발생 */
-    protected static final byte CAN = 0x18; /* 취소 */
-    protected static final byte CPMEOF = 0x1A; /* 마지막 패딩 */
-    protected static final byte START_ACK = 'C'; /* YModem 시작 신호 */
+public class YModemBluetoothServerImpl extends AbstractYModemServer {
+    private static final String TAG = "YModemBluetoothServer"; // 로그 출력용 태그
+    private static final String SERVICE_NAME = "YModemBluetoothServer"; // Bluetooth 서비스 이름 (클라이언트에서 검색 가능)
+    private static final UUID SERVICE_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB"); // SPP(Serial Port Profile) 표준 UUID
 
-    private static final String TAG = "YModemBluetoothServer";
-    private static final String SERVICE_NAME = "YModemBluetoothServer";
-    private static final UUID SERVICE_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB"); // SPP 표준 UUID
-
-    // Bluetooth 관련 필드들 (기존 코드에서 가져옴)
-    private BluetoothServerSocket bluetoothServerSocket;
-    private BluetoothSocket bluetoothClientSocket;
-    private AcceptThread acceptThread;
-    private boolean isConnected = false;
-
-    // YModem 관련 필드들 (TCP와 동일)
-    private File APK_PATH;
-    private String PackageBasePath = "kr.co.mirerotack";
-    private String NEW_APK_FILE_NAME = "firmware.apk";
-    private static final String dataFileName = "RtuStatus.json";
-    private Context context;
-    private int errorCount = 0;
-    private boolean isRunning = false;
-
-    Handler handler = new Handler(Looper.getMainLooper());
-    Gson gson = new Gson();
+    private BluetoothServerSocket bluetoothServerSocket; // 클라이언트 연결을 대기하는 Bluetooth 서버 소켓
+    private BluetoothSocket bluetoothClientSocket; // 연결된 클라이언트와 통신하는 Bluetooth 소켓
+    private AcceptThread acceptThread; // 클라이언트 연결 수락을 담당하는 별도 스레드
 
     /**
      * Bluetooth 서버 생성자
-     * @param apkDownloadPath APK 다운로드 경로
-     * @param context 애플리케이션 컨텍스트
+     * @param apkDownloadPath APK 파일을 저장할 디렉토리 경로
+     * @param context Android 애플리케이션 컨텍스트 (Bluetooth 권한 및 시스템 접근용)
      */
     public YModemBluetoothServerImpl(File apkDownloadPath, Context context) {
-        this.APK_PATH = apkDownloadPath;
-        this.context = context;
+        super(apkDownloadPath, context); // 부모 클래스의 공통 초기화 실행
     }
 
+    /**
+     * 서버 타입 이름을 반환합니다 (로그 출력용)
+     * @return "Bluetooth" 문자열
+     */
     @Override
-    public void startServer(int channel) {
-        isRunning = true;
-        logMessage("==========================================================");
-        logMessage("Bluetooth YModem Server starting...");
+    protected String getServerType() {
+        return "Bluetooth";
+    }
 
-        // Accept 스레드 시작 (기존 로직 활용)
+    /**
+     * Bluetooth 서버를 시작합니다
+     * TCP와 달리 별도의 AcceptThread를 생성하여 연결 관리를 위임합니다
+     * @param channel 사용하지 않음 (Bluetooth는 UUID로 채널 관리)
+     * @throws IOException 스레드 시작 실패 시 예외 발생
+     */
+    @Override
+    protected void startServerSocket(int channel) throws IOException {
+        // Bluetooth는 별도의 AcceptThread로 처리 (TCP와 다른 비동기 방식)
         startAcceptThread();
     }
 
     /**
-     * 클라이언트 연결 요청을 수락하는 스레드 (기존 BluetoothServerService 로직 활용)
+     * 클라이언트 연결을 대기합니다
+     * AcceptThread에서 연결이 완료될 때까지 폴링 방식으로 대기
+     * @return 연결된 BluetoothSocket 객체
+     * @throws IOException 연결 대기 중 인터럽트 발생 시 예외 발생
      */
-    private void startAcceptThread() {
-        // 이미 실행 중인 스레드가 있으면 중지
-        if (acceptThread != null) {
-            acceptThread.cancel();
+    @Override
+    protected Object acceptClientConnection() throws IOException {
+        // AcceptThread에서 연결이 완료될 때까지 대기 (폴링 방식)
+        while (bluetoothClientSocket == null && isRunning) {
+            try {
+                Thread.sleep(100); // 100ms마다 연결 상태 확인
+            } catch (InterruptedException e) {
+                throw new IOException("Bluetooth connection interrupted");
+            }
         }
-
-        acceptThread = new AcceptThread();
-        acceptThread.start();
+        return bluetoothClientSocket; // 연결된 소켓 반환
     }
 
     /**
-     * Accept 스레드 클래스 - 기존 BluetoothServerService 로직을 그대로 활용
+     * Bluetooth 소켓에서 입력 스트림을 획득합니다
+     * @param clientConnection 클라이언트 연결 객체 (BluetoothSocket으로 캐스팅됨)
+     * @return 데이터 수신용 InputStream
+     * @throws IOException 스트림 획득 실패 시 예외 발생
+     */
+    @Override
+    protected InputStream getInputStream(Object clientConnection) throws IOException {
+        return ((BluetoothSocket) clientConnection).getInputStream();
+    }
+
+    /**
+     * Bluetooth 소켓에서 출력 스트림을 획득합니다
+     * @param clientConnection 클라이언트 연결 객체 (BluetoothSocket으로 캐스팅됨)
+     * @return 데이터 송신용 OutputStream
+     * @throws IOException 스트림 획득 실패 시 예외 발생
+     */
+    @Override
+    protected OutputStream getOutputStream(Object clientConnection) throws IOException {
+        return ((BluetoothSocket) clientConnection).getOutputStream();
+    }
+
+    /**
+     * Bluetooth 클라이언트 연결을 안전하게 종료합니다
+     * @param clientConnection 종료할 클라이언트 연결 객체
+     */
+    @Override
+    protected void closeClientConnection(Object clientConnection) {
+        try {
+            if (clientConnection != null) {
+                ((BluetoothSocket) clientConnection).close();
+            }
+        } catch (IOException e) {
+            logMessage("[X] Bluetooth socket close error: " + e.getMessage());
+        }
+    }
+
+    /**
+     * 연결된 Bluetooth 클라이언트의 정보를 문자열로 반환합니다
+     * @param clientConnection 클라이언트 연결 객체
+     * @return 클라이언트 장치명과 MAC 주소 (예: "Galaxy S21 (00:11:22:33:44:55)")
+     */
+    @Override
+    protected String getClientInfo(Object clientConnection) {
+        BluetoothSocket socket = (BluetoothSocket) clientConnection;
+        return socket.getRemoteDevice().getName() + " (" + socket.getRemoteDevice().getAddress() + ")";
+    }
+
+    /**
+     * Bluetooth 서버의 모든 리소스를 안전하게 정리합니다
+     * AcceptThread, 서버 소켓, 클라이언트 소켓을 순차적으로 종료
+     */
+    @Override
+    public void closeExistingServerSocket() {
+        try {
+            // 1. AcceptThread 종료 (새로운 연결 수락 중단)
+            if (acceptThread != null) {
+                acceptThread.cancel();
+                acceptThread = null;
+            }
+            // 2. 서버 소켓 종료 (연결 대기 중단)
+            if (bluetoothServerSocket != null) {
+                bluetoothServerSocket.close();
+                logMessage("[O] Bluetooth server socket closed successfully");
+            }
+            // 3. 클라이언트 소켓 종료 (기존 연결 종료)
+            if (bluetoothClientSocket != null) {
+                bluetoothClientSocket.close();
+                logMessage("[O] Bluetooth client socket closed successfully");
+            }
+        } catch (IOException e) {
+            logMessage("[X] Failed to close Bluetooth server socket: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Bluetooth 서버가 현재 실행 중인지 상태를 확인합니다
+     * @return 서버가 실행 중이면 true, 아니면 false
+     */
+    @Override
+    public boolean isRunning() {
+        return isRunning; // 부모 클래스의 상태 플래그 사용
+    }
+
+    /**
+     * AcceptThread를 시작하여 클라이언트 연결 수락을 시작합니다
+     * 기존 스레드가 실행 중인 경우 먼저 종료 후 새로 시작
+     */
+    private void startAcceptThread() {
+        // 기존 AcceptThread가 있으면 종료
+        if (acceptThread != null) {
+            acceptThread.cancel();
+        }
+        acceptThread = new AcceptThread(); // 새로운 AcceptThread 생성
+        acceptThread.start(); // 스레드 시작
+    }
+
+    /**
+     * Bluetooth 클라이언트 연결을 수락하고 관리하는 전용 스레드
+     * TCP와 달리 Bluetooth는 어댑터 상태 관리, 페어링 확인 등 복잡한 초기화가 필요하므로
+     * 별도 스레드에서 비동기로 처리합니다
      */
     private class AcceptThread extends Thread {
-        private boolean running = true;
+        private boolean running = true; // 스레드 실행 상태 플래그
 
         @Override
         public void run() {
-            BluetoothAdapter bluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
+            BluetoothAdapter bluetoothAdapter = BluetoothAdapter.getDefaultAdapter(); // 시스템 Bluetooth 어댑터 획득
 
+            // 1. Bluetooth 어댑터 존재 여부 확인
             if (bluetoothAdapter == null) {
                 logMessage("[X] Bluetooth 어댑터 없음");
                 Log.e(TAG, "Bluetooth 어댑터를 찾을 수 없음");
-                return;
+                return; // Bluetooth 미지원 디바이스
             }
 
             Log.d(TAG, "isEnabled = " + bluetoothAdapter.isEnabled());
             Log.d(TAG, "name = " + bluetoothAdapter.getName());
 
-            // Bluetooth 활성화 대기 로직 (기존과 동일)
+            // 2. Bluetooth 활성화 대기 로직 (최대 20초 대기)
             int waitTime = 0;
             while (!bluetoothAdapter.isEnabled() && waitTime < 20000) {
                 try {
                     Log.e(TAG, "bluetoothAdapter.isEnabled() is false, waitTime: " + waitTime + "ms");
                     Log.d(TAG, "retry, bluetoothAdapter.enable()");
-                    bluetoothAdapter.enable();
-                    Thread.sleep(500);
+                    bluetoothAdapter.enable(); // Bluetooth 활성화 시도
+                    Thread.sleep(500); // 500ms 대기
                 } catch (InterruptedException e) {
                     throw new RuntimeException(e);
                 }
                 waitTime += 500;
             }
 
-            // Reflection을 통한 Bluetooth 강제 활성화 (기존과 동일)
+            // 3. Reflection을 통한 Bluetooth 강제 활성화 (권한이 필요한 고급 기능)
             if (!bluetoothAdapter.isEnabled()) {
                 logMessage("[X] Bluetooth 꺼져 있음");
                 Log.e(TAG, "Bluetooth가 꺼져 있음");
 
                 try {
+                    // Java Reflection을 사용하여 시스템 권한으로 Bluetooth 강제 활성화
                     Method enableMethod = BluetoothAdapter.class.getMethod("enable");
-                    enableMethod.setAccessible(true);
+                    enableMethod.setAccessible(true); // private 메서드 접근 허용
                     boolean success = (boolean) enableMethod.invoke(bluetoothAdapter);
                     Log.d("Bluetooth", "enable() called: " + success);
                 } catch (Exception e) {
@@ -155,16 +229,16 @@ public class YModemBluetoothServerImpl implements YModemServerInterface {
                 }
             }
 
-            // 페어링된 장치 로깅 (기존과 동일)
+            // 4. 페어링된 장치 목록 로깅 (디버깅 및 연결 가능 장치 확인용)
             Set<BluetoothDevice> bondedDevices = bluetoothAdapter.getBondedDevices();
             for (BluetoothDevice device : bondedDevices) {
                 Log.d(TAG, "Paired device: " + device.getName() + ", " + device.getAddress());
             }
 
-            // 연결 수락 무한 루프 (기존과 동일)
+            // 5. 클라이언트 연결 수락 무한 루프 (서버의 핵심 로직)
             while (running && isRunning) {
                 try {
-                    // 이전 서버 소켓이 있으면 닫기
+                    // 이전 서버 소켓이 있으면 정리 (재연결 준비)
                     if (bluetoothServerSocket != null) {
                         try {
                             bluetoothServerSocket.close();
@@ -173,37 +247,49 @@ public class YModemBluetoothServerImpl implements YModemServerInterface {
                         }
                     }
 
-                    // 새 서버 소켓 생성
+                    // 새 RFCOMM 서버 소켓 생성 (Insecure 모드 사용)
                     bluetoothServerSocket = bluetoothAdapter.listenUsingInsecureRfcommWithServiceRecord(SERVICE_NAME, SERVICE_UUID);
                     logMessage("[O] Bluetooth 서버 소켓 생성 성공, 연결 대기 중...");
                     Log.d(TAG, "서버 소켓 생성 성공, 연결 대기 중...");
 
-                    // 연결 수락 (블로킹 호출)
+                    // 클라이언트 연결 수락 (블로킹 호출 - 연결될 때까지 대기)
                     bluetoothClientSocket = bluetoothServerSocket.accept();
 
                     if (bluetoothClientSocket != null) {
                         synchronized (YModemBluetoothServerImpl.this) {
-                            isConnected = true;
                             logMessage("[O] Bluetooth 클라이언트 연결 성공: " + bluetoothClientSocket.getRemoteDevice().getName());
                             Log.d(TAG, "클라이언트 연결 성공: " + bluetoothClientSocket.getRemoteDevice().getName());
 
-                            // 🎯 핵심: YModem 파일 처리 시작 (TCP와 동일한 로직)
+                            // 🎯 핵심: YModem 파일 처리 시작 (부모 클래스의 공통 로직 사용)
                             try {
-                                handleIncomingFile(bluetoothClientSocket);
+                                handleIncomingFile(bluetoothClientSocket); // YModem 프로토콜 처리
                             } catch (Exception e) {
                                 logMessage("[X] YModem 파일 처리 중 오류: " + e.getMessage());
-                                handleError(e);
+                                handleError(e); // 부모 클래스의 오류 처리 로직 호출
+                            } finally {
+                                // 연결 처리 완료 후 클라이언트 소켓 정리
+                                try {
+                                    if (bluetoothClientSocket != null) {
+                                        bluetoothClientSocket.close();
+                                        bluetoothClientSocket = null; // 다음 연결을 위해 null로 초기화
+                                    }
+                                } catch (IOException e) {
+                                    Log.e(TAG, "클라이언트 소켓 닫기 실패", e);
+                                }
                             }
 
-                            // 서버 소켓 닫기 (한 번에 하나의 연결만 처리)
+                            // 서버 소켓 닫기 (한 번에 하나의 연결만 처리하는 정책)
                             try {
-                                bluetoothServerSocket.close();
+                                if (bluetoothServerSocket != null) {
+                                    bluetoothServerSocket.close();
+                                }
                             } catch (IOException e) {
                                 Log.e(TAG, "서버 소켓 닫기 실패", e);
                             }
                         }
                     }
                 } catch (IOException e) {
+                    // 연결 실패 시 재시도 로직
                     if (running && isRunning) {
                         if (bluetoothAdapter.isEnabled()) {
                             logMessage("[X] Bluetooth 클라이언트 연결 중 오류 발생, 재시도 중...");
@@ -213,20 +299,21 @@ public class YModemBluetoothServerImpl implements YModemServerInterface {
                             Log.e(TAG, "bluetoothAdapter.isEnabled() is False... 재시도 중...", e);
                         }
 
-                        // 잠시 대기 후 재시도
+                        // 5초 대기 후 재시도 (너무 빈번한 재시도 방지)
                         try {
-                            Thread.sleep(5000); // TCP보다 짧게 설정
+                            Thread.sleep(5000);
                         } catch (InterruptedException ie) {
-                            Thread.currentThread().interrupt();
-                            running = false;
+                            Thread.currentThread().interrupt(); // 인터럽트 상태 복원
+                            running = false; // 스레드 종료
                         }
                     }
                 } catch (Exception e) {
+                    // 예상치 못한 예외 발생 시 처리
                     if (running && isRunning) {
                         logMessage("[X] Bluetooth 클라이언트 연결 중 예외 발생, 재시도 중...");
                         Log.e(TAG, "accept() 예외, 재시도 중...", e);
 
-                        // 잠시 대기 후 재시도
+                        // 5초 대기 후 재시도
                         try {
                             Thread.sleep(5000);
                         } catch (InterruptedException ie) {
@@ -238,454 +325,19 @@ public class YModemBluetoothServerImpl implements YModemServerInterface {
             }
         }
 
+        /**
+         * AcceptThread를 안전하게 종료합니다
+         * 실행 중인 accept() 호출을 중단하고 서버 소켓을 닫습니다
+         */
         public void cancel() {
-            running = false;
+            running = false; // 루프 종료 플래그 설정
             try {
+                // 서버 소켓을 닫아서 accept() 호출을 중단시킴
                 if (bluetoothServerSocket != null) {
                     bluetoothServerSocket.close();
                 }
             } catch (IOException e) {
                 Log.e(TAG, "AcceptThread 취소 중 오류", e);
-            }
-        }
-    }
-
-    @Override
-    public void closeExistingServerSocket() {
-        try {
-            if (bluetoothServerSocket != null) {
-                bluetoothServerSocket.close();
-                logMessage("[O] Bluetooth 서버 소켓 닫기 성공");
-            }
-            if (bluetoothClientSocket != null) {
-                bluetoothClientSocket.close();
-                logMessage("[O] Bluetooth 클라이언트 소켓 닫기 성공");
-            }
-        } catch (IOException e) {
-            logMessage("[X] Bluetooth 서버 소켓 닫기 실패: " + e.getMessage());
-        }
-    }
-
-    @Override
-    public void stopServer() {
-        isRunning = false;
-
-        // Accept 스레드 종료
-        if (acceptThread != null) {
-            acceptThread.cancel();
-            acceptThread = null;
-        }
-
-        closeExistingServerSocket();
-        logMessage("[O] Bluetooth YModem 서버 중지됨");
-    }
-
-    @Override
-    public boolean isRunning() {
-        return isRunning;
-    }
-
-    /**
-     * 🔥 핵심 메서드: Bluetooth 소켓으로 YModem 파일 처리 (TCP 로직과 거의 동일)
-     * @param socket Bluetooth 클라이언트 소켓
-     * @throws IOException 입출력 예외 발생시
-     */
-    private void handleIncomingFile(BluetoothSocket socket) throws IOException {
-        InputStream inputStream = null;
-        OutputStream outputStream = null;
-        int timeoutRetries = 0;
-
-        File saveDirectory = APK_PATH;
-        if (!saveDirectory.exists()) saveDirectory.mkdirs();
-
-        try {
-            // 🎯 Bluetooth 소켓에서 스트림 획득 (TCP와 동일한 방식!)
-            inputStream = socket.getInputStream();
-            outputStream = socket.getOutputStream();
-
-            logMessage("--------------------3. Bluetooth Starting to receive--------------------");
-
-            // 🎯 YModem 클래스는 수정하지 않고 그대로 사용!
-            YModem yModem = new YModem(inputStream, outputStream);
-
-            // 1️⃣ [RX] 헤더 수신 (TCP와 완전히 동일)
-            logMessage("3. Starting to receive header...");
-            File receivedHeader = yModem.receive_Header(saveDirectory, true);
-            if (receivedHeader == null) {
-                throw new IOException("[X] 3-101. Failed to receive header!");
-            }
-
-            logMessage("[O] 3-2. Header received successfully");
-            sendByte(outputStream, ACK, "4-1. [TX] ACK");
-
-            if(yModem.getIsSyncDataMode()) {
-                logMessage("handleSyncDataMode Start");
-                syncData(context, inputStream, outputStream);
-                return;
-            }
-
-            if (yModem.getIsRebootMode()) {
-                logMessage("handleRebootMode Start");
-                Process processStart = Runtime.getRuntime().exec("ssu -c reboot");
-                processStart.waitFor();
-                return;
-            }
-
-            // 2️⃣ [RX] APK 수신 (TCP와 완전히 동일)
-            logMessage("5. Waiting for APK data...");
-            File receivedFile = yModem.receive_APK(new File(""), false);
-
-            if (!checkFileIntegrity(receivedFile, yModem.getExpectedFileSize(), outputStream))
-                return;
-
-            receivedFile = renameFile(receivedFile, NEW_APK_FILE_NAME);
-
-            // 3️⃣ [TX] 전송 종료 신호 (TCP와 완전히 동일)
-            sendByte(outputStream, EOT, "7-1. [TX] EOT");
-            waitSeconds(3000);
-
-            while (true) {
-                if (receiveByte(inputStream) == EOT) {
-                    logMessage("7-4. [RX] EOT");
-                    break;
-                }
-            }
-
-            ApkValidationResult apkValidationResult = ValidateAPK(receivedFile.getPath(), yModem.getIsForceUpdateMode());
-
-            if (apkValidationResult.getIsUpdate()) {
-                logMessage("[Update O] : " + apkValidationResult.getInstallCode() + ", " + apkValidationResult.getComment());
-                logMessage("[O] APK is fine. Rebooting for update in 5 seconds.");
-
-                handler.postDelayed(new Runnable() {
-                    @Override
-                    public void run() {
-                        rebootDevice();
-                    }
-                }, 5000);
-            } else {
-                logMessage("[Update X] : " + apkValidationResult.getUninstallCode() + ", " + apkValidationResult.getComment());
-                logMessage("[X] Update (reboot) skipped, APK file deleted.");
-                receivedFile.delete();
-            }
-        } catch (PackageManager.NameNotFoundException e) {
-            throw new RuntimeException(e);
-        } catch (InterruptedException e) {
-            throw new RuntimeException(e);
-        } catch (Exception e) {
-            logMessage("[X] Bluetooth YModem 처리 중 오류 발생: " + e.getMessage());
-            saveDirectory.delete();
-            handleError(e);
-        } finally {
-            try {
-                if (inputStream != null) inputStream.close();
-                if (outputStream != null) outputStream.close();
-                if (socket != null) {
-                    socket.close();
-                }
-            } catch (IOException e) {
-                logMessage("[X] Bluetooth Socket close error: " + e.getMessage());
-            }
-        }
-    }
-
-    // 🔥 이하 모든 메서드들은 TCP 버전과 완전히 동일 (YModem 프로토콜 처리)
-    private boolean syncData(Context context, InputStream inputStream, OutputStream outputStream) throws IOException {
-        try {
-            RtuSnapshot snapshot;
-
-            // 1. JSON 파일 존재 여부 확인 및 로드
-            File file = new File(context.getFilesDir(), dataFileName);
-
-            logMessage("불러올 Json 파일 절대 경로 : " + file.getAbsolutePath());
-            logMessage("불러올 Json 파일 존재 여부 : " + file.exists());
-
-            if (file.exists()) {
-                // 1. JSON 파싱
-                String jsonString = readJsonFile(file);
-
-                snapshot = gson.fromJson(jsonString, RtuSnapshot.class);
-                logMessage("8-0. [RX] 센서 데이터: 파일에서 로드됨");
-
-                // 2. timestamp 현재 시간으로 갱신
-                snapshot.timestamp = getCurrentTimestamp();
-
-                // 3. JSON 파일에 다시 저장 (timestamp 반영)
-                updateTimestampToFile(context, snapshot);
-
-                logMessage("8-0. [RX] JSON 파일에 timestamp 갱신됨");
-            } else {
-                // 4. 파일이 없으면 더미 데이터 생성 후 파일로 저장
-                logMessage("8-0. [RX] RtuStatus.json 파일 없음, 더미 데이터로 대체");
-                snapshot = createDummyData();
-                snapshot.timestamp = getCurrentTimestamp();
-
-                updateTimestampToFile(context, snapshot);
-                logMessage("8-0. [RX] 더미 JSON 파일 생성됨");
-            }
-
-            // 5. 최종적으로 파일 다시 읽어서 전송
-            String finalJson = readJsonFile(file);
-            byte[] dataBytes = finalJson.getBytes("UTF-8");
-
-            outputStream.write(dataBytes);
-            outputStream.flush();
-
-            logMessage("8-1. [RX] 센서 데이터 전송 성공");
-            return true;
-
-        } catch (IOException e) {
-            logMessage("8-100. [RX] 센서 데이터 전송 실패 (IOException), " + e.getCause() + ", " + e.getMessage());
-            return false;
-        }
-    }
-
-    private void updateTimestampToFile(Context context, RtuSnapshot snapshot) throws IOException {
-        File file = new File(context.getFilesDir(), dataFileName);
-        String json = gson.toJson(snapshot);
-
-        FileOutputStream fos = new FileOutputStream(file, false);
-        fos.write(json.getBytes("UTF-8"));
-        fos.close();
-    }
-
-    private String readJsonFile(File file) throws IOException {
-        StringBuilder builder = new StringBuilder();
-        BufferedReader reader = new BufferedReader(new InputStreamReader(new FileInputStream(file), "UTF-8"));
-        String line;
-        while ((line = reader.readLine()) != null) {
-            builder.append(line);
-        }
-        reader.close();
-        return builder.toString();
-    }
-
-    private void waitSeconds(int waitTime) {
-        try {
-            Thread.sleep(waitTime);
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
-    }
-
-    private boolean checkFileIntegrity(File receivedFile, long expectedSize, OutputStream outputStream) throws IOException {
-        if (receivedFile == null) {
-            logMessage("[X] File is null.");
-            return false;
-        }
-
-        if (!receivedFile.exists() || receivedFile.length() == 0) {
-            logMessage("[X] 5-101. Failed to receive APK file data!");
-            return false;
-        }
-
-        logMessage("The expected file size is " + expectedSize + " bytes");
-        RemovePadding(receivedFile.getPath(), expectedSize);
-
-        long receivedSize = receivedFile.length();
-        logMessage("The actual received file size is " + receivedSize + " bytes");
-
-        if (expectedSize != receivedSize) {
-            logMessage("[X] Data integrity verification failed! (Expected: " + expectedSize + " bytes / Received: " + receivedSize + " bytes)");
-            sendByte(outputStream, NAK, "[X] 6-100. " + "[TX] NAK");
-            receivedFile.delete();
-            return false;
-        }
-
-        logMessage("[O] Data integrity verification successful!");
-        return true;
-    }
-
-    private File renameFile(File file, String newFileName) {
-        if (file == null || !file.exists()) {
-            logMessage("[X] File does not exist.");
-            return null;
-        }
-
-        String originalFileName = file.getName();
-        File renamedFile = new File(file.getParent(), newFileName);
-
-        boolean success = file.renameTo(renamedFile);
-
-        if (success) {
-            logMessage("[O] File name has been changed from " + originalFileName + " to " + newFileName + ": " + renamedFile.getPath());
-            return renamedFile;
-        } else {
-            logMessage("[X] Failed to rename the file");
-            return null;
-        }
-    }
-
-    private void sendByte(OutputStream outputStream, byte data, String message) throws IOException {
-        outputStream.write(data);
-        outputStream.flush();
-        logMessage(message);
-    }
-
-    private byte receiveByte(InputStream inputStream) throws IOException {
-        byte[] buffer = new byte[1];
-        if (inputStream.read(buffer) > 0) return buffer[0];
-        return -1;
-    }
-
-    private void handleError(Exception e) {
-        String errorMsg = e.getMessage();
-        logMessage("[X] Bluetooth Socket error occurred: " + errorMsg);
-        boolean isExpectedError = false;
-
-        if (errorMsg == null) {
-            logMessage("[X] errorMsg does not exist...");
-            closeExistingServerSocket();
-            return;
-        }
-        // 클라이언트가 갑자기 종료된 경우 예외 처리
-        else if (errorMsg.contains("EPIPE") || errorMsg.contains("ECONNRESET")) {
-            logMessage("[X] Bluetooth Client connection was forcibly closed. Closing socket and waiting...");
-            isExpectedError = true;
-        }
-        // 헤더 오류들
-        else if (errorMsg.contains("Invalid YModem header")) {
-            logMessage("[X] Bluetooth Client sent an invalid header. Closing socket and waiting...");
-            isExpectedError = true;
-        } else if (errorMsg.contains("RepeatedBlockException")) {
-            logMessage("[X] 5-601. Bluetooth Received a duplicate of the previous block. Closing socket and waiting...");
-            isExpectedError = true;
-        } else if (errorMsg.contains("SynchronizationLostException")) {
-            logMessage("[X] 5-602. Bluetooth Block number mismatch. Closing socket and waiting...");
-            isExpectedError = true;
-        } else if (errorMsg.contains("InvalidBlockException")) {
-            logMessage("[X] 5-603. Bluetooth Calibration value mismatch or 5-604. CRC mismatch. Closing socket and waiting...");
-            isExpectedError = true;
-        }
-
-        if (isExpectedError == true) {
-            closeExistingServerSocket();
-            return;
-        }
-
-        // 기타 오류 발생 시에는 재시작 처리
-        logMessage("[X] Bluetooth Unhandled error occurred. Restarting server socket.");
-        closeExistingServerSocket();
-    }
-
-    private void rebootDevice() {
-        try {
-            Process process = Runtime.getRuntime().exec("ssu -c reboot");
-            process.waitFor();
-            logMessage("Device rebooting...");
-        } catch (Exception e) {
-            logMessage("Reboot failed: " + e.getMessage());
-        }
-    }
-
-    private String findInstalledPackageName(String target, String nonTarget) {
-        try {
-            Process process = Runtime.getRuntime().exec("pm list packages " + target);
-            BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-            String line;
-
-            while ((line = reader.readLine()) != null) {
-                if (line.startsWith("package:")) {
-                    String packageName = line.replace("package:", "").trim();
-
-                    if (!packageName.equals(nonTarget)) {
-                        return packageName;
-                    }
-                }
-            }
-            reader.close();
-        } catch (IOException e) {
-            logMessage("[X] Error occurred while retrieving package list: " + e.getMessage());
-        }
-
-        return null;
-    }
-
-    private ApkValidationResult ValidateAPK(String apkPath, boolean isForceUpdate) {
-        PackageManager pm = context.getPackageManager();
-        PackageInfo apkInfo = pm.getPackageArchiveInfo(apkPath, 0);
-
-        if (apkInfo == null) {
-            return new ApkValidationResult(false, "[X] APK may be corrupted (unable to retrieve package information)", UninstallResult.APK_CORRUPTED);
-        }
-
-        int apkVersionCode = apkInfo.versionCode;
-        String apkPackageName = apkInfo.packageName;
-        logMessage("Package name retrieved from APK: " + apkPackageName);
-
-        String installedAppPackageName = findInstalledPackageName(PackageBasePath, PackageBasePath + ".apkdownloader");
-        logMessage("Currently installed package name: " + installedAppPackageName);
-
-        if (installedAppPackageName != null && !apkPackageName.equals(installedAppPackageName) && isForceUpdate == true) {
-            logMessage(" Package mismatch: " +
-                    "Existing: " + installedAppPackageName.replace(PackageBasePath, "") +
-                    ", APK: " + apkPackageName.replace(PackageBasePath, "")
-            );
-            return new ApkValidationResult(true, "[O] Existing app will be removed and the new APK will be installed (Force update enabled). Proceeding with APK_Version " + apkVersionCode, InstallResult.DIFFRENT_PACKAGE_NAME);
-        } else if (installedAppPackageName != null && !apkPackageName.equals(installedAppPackageName)) {
-            logMessage(" Package mismatch: " +
-                    "Existing: " + installedAppPackageName.replace(PackageBasePath, "") +
-                    ", APK: " + apkPackageName.replace(PackageBasePath, "")
-            );
-            return new ApkValidationResult(false, "[X] The package name of the installed app and the APK are different. Please enable force update.", UninstallResult.DIFFRENT_PACKAGE_NAME_NOT_FORCE);
-        }
-
-        PackageInfo installedAppInfo;
-        try {
-            installedAppInfo = pm.getPackageInfo(installedAppPackageName, 0);
-        } catch (PackageManager.NameNotFoundException e) {
-            return new ApkValidationResult(true, "The app " +
-                    apkPackageName.replace(PackageBasePath + ".", "") + " is not installed." +
-                    " Proceeding with installation using APK_Version " + apkVersionCode, InstallResult.APP_NOT_INSTALLED);
-        }
-
-        int installedVersionCode = installedAppInfo.versionCode;
-        logMessage("Installed version: " + installedVersionCode + ", APK version: " + apkVersionCode);
-
-        if (isForceUpdate) {
-            return new ApkValidationResult(true, "[O] Force update: " + installedVersionCode + " -> " + apkVersionCode, InstallResult.FORCE_UPDATE);
-        }
-
-        if (apkVersionCode > installedVersionCode) {
-            return new ApkValidationResult(true, "[O] Newer version (" + apkVersionCode + ") available. Proceeding with update.", InstallResult.NEW_VERSION_AVAILABLE);
-        } else {
-            return new ApkValidationResult(false, "[X] The app is already up to date.", UninstallResult.ALREADY_LATEST_VERSION);
-        }
-    }
-
-    public static void RemovePadding(String filePath, Long expectedSize) {
-        long actualSize, paddingStart;
-        int remainder = 1024 - (int) (expectedSize % 1024);
-        RandomAccessFile file = null;
-
-        try {
-            file = new RandomAccessFile(filePath, "rw");
-            actualSize = file.length();
-            paddingStart = actualSize - remainder;
-
-            file.seek(paddingStart);
-            boolean isPadded = true;
-
-            for (int i = 0; i < remainder; i++) {
-                if (file.read() != 0x1A) {
-                    isPadded = false;
-                    break;
-                }
-            }
-
-            if (isPadded) {
-                file.setLength(paddingStart);
-                logMessage("[O] Removed " + remainder + " padding bytes successfully!");
-            } else {
-                logMessage("[O] No additional padding found.");
-            }
-        } catch (Exception e) {
-            logMessage("[X] Error occurred while removing padding: " + e.getMessage());
-        } finally {
-            if (file != null) {
-                try {
-                    file.close();
-                } catch (IOException e) { /* 무시 가능 */ }
             }
         }
     }

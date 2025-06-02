@@ -1,48 +1,168 @@
 <?xml version="1.0" encoding="utf-8"?>
-<android.support.constraint.ConstraintLayout xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:app="http://schemas.android.com/apk/res-auto"
-    xmlns:tools="http://schemas.android.com/tools"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:padding="16dp">
+    android:orientation="horizontal"
+    android:padding="16dp"
+    android:background="#f5f5f5">
 
-    <TextView
-        android:id="@+id/txtStatus"
+    <!-- 왼쪽: 서버 설정 패널 -->
+    <LinearLayout
         android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:gravity="center"
-        android:paddingVertical="24dp"
-        android:text="Status: Not Running"
-        android:textSize="22sp"
-        android:textStyle="bold"
-        app:layout_constraintBottom_toTopOf="@+id/btnStartServer"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintHorizontal_bias="0.0"
-        app:layout_constraintStart_toStartOf="parent" />
+        android:layout_height="match_parent"
+        android:layout_weight="1"
+        android:orientation="vertical"
+        android:layout_marginEnd="16dp"
+        android:background="#ffffff"
+        android:padding="20dp"
+        android:elevation="2dp">
 
-    <Button
-        android:id="@+id/btnStartServer"
+        <!-- 앱 제목 -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="YModem 서버"
+            android:textSize="22sp"
+            android:textStyle="bold"
+            android:textColor="#333333"
+            android:gravity="center"
+            android:layout_marginBottom="24dp" />
+
+        <!-- 서버 타입 선택 -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="서버 타입 선택"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:textColor="#333333"
+            android:layout_marginBottom="12dp" />
+
+        <RadioGroup
+            android:id="@+id/radioGroupServerType"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:layout_marginBottom="24dp">
+
+            <RadioButton
+                android:id="@+id/radioTCP"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="TCP 서버 (포트: 55556)"
+                android:textSize="14sp"
+                android:textColor="#333333"
+                android:padding="8dp"
+                android:checked="true" />
+
+            <RadioButton
+                android:id="@+id/radioBluetooth"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Bluetooth 서버 (RFCOMM)"
+                android:textSize="14sp"
+                android:textColor="#333333"
+                android:padding="8dp" />
+
+        </RadioGroup>
+
+        <!-- 서버 제어 버튼들 -->
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+            <Button
+                android:id="@+id/btnStartServer"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:text="서버 시작"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:textColor="#ffffff"
+                android:background="#4CAF50"
+                android:layout_marginBottom="12dp"
+                android:elevation="2dp" />
+
+            <Button
+                android:id="@+id/btnStopServer"
+                android:layout_width="match_parent"
+                android:layout_height="48dp"
+                android:text="서버 중지"
+                android:textSize="16sp"
+                android:textStyle="bold"
+                android:textColor="#ffffff"
+                android:background="#f44336"
+                android:elevation="2dp"
+                android:enabled="false" />
+
+        </LinearLayout>
+
+        <!-- 하단 정보 -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:text="💡 TCP: 네트워크 연결\n📱 Bluetooth: 페어링 장치"
+            android:textSize="11sp"
+            android:textColor="#666666"
+            android:lineSpacingExtra="2dp"
+            android:gravity="center" />
+
+    </LinearLayout>
+
+    <!-- 오른쪽: 상태 표시 패널 -->
+    <LinearLayout
         android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:paddingVertical="24dp"
-        android:layout_marginBottom="200dp"
-        android:text="Start Server"
-        android:textSize="18sp"
-        app:layout_constraintBottom_toBottomOf="parent"
-        app:layout_constraintEnd_toStartOf="@+id/btnSendData"
-        app:layout_constraintHorizontal_bias="0.5"
-        app:layout_constraintStart_toStartOf="parent" />
+        android:layout_height="match_parent"
+        android:layout_weight="1.5"
+        android:orientation="vertical"
+        android:background="#ffffff"
+        android:padding="20dp"
+        android:elevation="2dp">
 
-    <Button
-        android:id="@+id/btnSendData"
-        android:layout_width="0dp"
-        android:layout_height="wrap_content"
-        android:paddingVertical="24dp"
-        android:text="임시 데이터 전송"
-        android:textSize="18sp"
-        app:layout_constraintBottom_toBottomOf="@+id/btnStartServer"
-        app:layout_constraintEnd_toEndOf="parent"
-        app:layout_constraintHorizontal_bias="0.5"
-        app:layout_constraintStart_toEndOf="@+id/btnStartServer" />
+        <!-- 상태 제목 -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="서버 상태"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:textColor="#333333"
+            android:layout_marginBottom="16dp" />
 
-</android.support.constraint.ConstraintLayout>
+        <!-- 상태 표시 영역 -->
+        <ScrollView
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:background="#f8f8f8"
+            android:padding="12dp"
+            android:scrollbars="vertical">
+
+            <TextView
+                android:id="@+id/txtStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="서버 타입을 선택하고 시작 버튼을 눌러주세요."
+                android:textSize="13sp"
+                android:textColor="#333333"
+                android:lineSpacingExtra="2dp"
+                android:fontFamily="monospace" />
+
+        </ScrollView>
+
+        <!-- 버전 정보 -->
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="16dp"
+            android:text="YModem Server v1.0"
+            android:textSize="12sp"
+            android:textColor="#999999"
+            android:textStyle="italic"
+            android:gravity="center" />
+
+    </LinearLayout>
+
+</LinearLayout>
