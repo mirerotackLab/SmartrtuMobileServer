@@ -78,17 +78,22 @@ public class BluetoothServerService extends Service {
         @Override
         public void run() {
             BluetoothAdapter bluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
+
             if (bluetoothAdapter == null) {
                 sendMessageToUI("Bluetooth 어댑터 없음");
                 Log.e(TAG, "Bluetooth 어댑터를 찾을 수 없음");
                 return;
             }
 
-            bluetoothAdapter.enable();
+            Log.d(TAG, "isEnabled = " + bluetoothAdapter.isEnabled());
+            Log.d(TAG, "name = " + bluetoothAdapter.getName());
+
             int waitTime = 0;
             while (!bluetoothAdapter.isEnabled() && waitTime < 20000) {
                 try {
                     Log.e(TAG, "bluetoothAdapter.isEnabled() is false, waitTime: " + waitTime + "ms");
+                    Log.d(TAG, "retry, bluetoothAdapter.enable()");
+                    bluetoothAdapter.enable();
                     Thread.sleep(500);
                 } catch (InterruptedException e) {
                     throw new RuntimeException(e);

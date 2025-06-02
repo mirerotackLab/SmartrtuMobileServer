@@ -1,0 +1,13 @@
+#!/system/bin/sh
+
+# 1. HCI0 장치 활성화
+/system/bin/hciconfig hci0 up
+
+# 2. 검색 가능 및 연결 허용 상태로 설정
+/system/bin/hciconfig hci0 piscan
+
+# 3. 상태 확인용 (옵션)
+/system/bin/hciconfig
+
+# 4. Agent 실행 (PIN = 0731)
+/system/xbin/agent --adapter hci0 0731

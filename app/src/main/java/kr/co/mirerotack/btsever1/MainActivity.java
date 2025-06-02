@@ -33,6 +33,7 @@ public class MainActivity extends AppCompatActivity {
 
     static {
         System.loadLibrary("MyJniLib");  // libMyJniLib.so 와 일치해야 함
+        System.loadLibrary("bluetooth_jni");
     }
 
 
@@ -78,13 +79,6 @@ public class MainActivity extends AppCompatActivity {
             server.startBluetoothServer();  // JNI 호출
             Log.d("NativeBT", "서버 결과: ");
         }).start();
-
-//        if (result == 0) {
-//            Log.i("JNI", "Bluetooth 서버 시작 성공");
-//        } else {
-//            Log.e("JNI", "Bluetooth 서버 시작 실패: " + result);
-//        }
-
 
         txtStatus = findViewById(R.id.txtStatus);
 
