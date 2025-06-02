@@ -1,38 +1,20 @@
 package kr.co.mirerotack.btsever1.ymodemServer;
 
-import android.bluetooth.BluetoothAdapter;
-import android.bluetooth.BluetoothDevice;
-import android.bluetooth.BluetoothServerSocket;
-import android.bluetooth.BluetoothSocket;
 import android.content.Context;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.os.Handler;
 import android.os.Looper;
-import android.util.Log;
 
 import com.google.gson.Gson;
 
 import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.RandomAccessFile;
-import java.lang.reflect.Method;
-import java.net.Inet4Address;
-import java.net.InetAddress;
-import java.net.InetSocketAddress;
-import java.net.NetworkInterface;
-import java.net.ServerSocket;
-import java.net.Socket;
-import java.net.SocketException;
-import java.util.Enumeration;
-import java.util.Set;
-import java.util.UUID;
 
 import kr.co.mirerotack.btsever1.RtuSnapshot;
 import kr.co.mirerotack.btsever1.model.ApkValidationResult;
@@ -73,6 +55,8 @@ public abstract class AbstractYModemServer implements YModemServerInterface {
     protected Handler handler = new Handler(Looper.getMainLooper());
     protected Gson gson = new Gson();
 
+    private Thread serverThread;
+
     /**
      * 공통 생성자
      * @param apkDownloadPath APK 다운로드 경로
@@ -96,7 +80,7 @@ public abstract class AbstractYModemServer implements YModemServerInterface {
     @Override
     public void startServer(int port) {
         isRunning = true;
-        new Thread(new Runnable() {
+        serverThread = new Thread(new Runnable() {
             @Override
             public void run() {
                 while (isRunning) {
@@ -144,12 +128,18 @@ public abstract class AbstractYModemServer implements YModemServerInterface {
                     }
                 }
             }
-        }).start();
+        });
+        serverThread.start();
     }
 
     @Override
     public void stopServer() {
         isRunning = false;
+        try {
+            serverThread.stop();
+        } catch (RuntimeException e) {
+            logMessage("[X] " + getServerType() + " Server thread already stopped: " + e.getMessage());
+        }
         closeExistingServerSocket();
         logMessage("[O] " + getServerType() + " server stopped");
     }

@@ -1,5 +1,4 @@
 // native_bt.cpp
-
 #include <jni.h>
 #include <string>
 #include <android/log.h>
@@ -26,9 +25,6 @@ void ba2strMac(const bdaddr_t *ba, char *str) {
 extern "C"
 JNIEXPORT jint JNICALL
 Java_kr_co_mirerotack_btsever1_MainActivity_00024NativeBtServer_startBluetoothServer(JNIEnv *env, jobject thiz) {
-    // hw_get_module(BLUETOOTH_HARDWARE_MODULE_ID, (const hw_module_t**)&module);
-    LOGI("Bluetooth HAL JNI, bluetooth.default.so loaded!");
-
     int sockfd, client;
     struct sockaddr_rc loc_addr = {0}, rem_addr = {0};
     char buf[1024] = {0};

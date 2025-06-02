@@ -141,13 +141,15 @@ public class Modem {
 
                     if (character == SOH || character == STX || character == EOT) {
                         return character;
+                    } else {
+                        logMessage("[X] SOH, STX, EOT가 아닌 " + character + "가 들어옴.");
                     }
                 }
             } catch (TimeoutException ignored) {
                 // repeat last block result and wait for next block one more time
                 if (++errorCount < MAXERRORS) {
                     sendByte(lastBlockResult ? ACK : NAK);
-                    Log.d(TAG, "100. [TX] " + (lastBlockResult ? "ACK" : "NAK") + ", First byte of data block is corrupted");
+                    logMessage("100. [TX] " + (lastBlockResult ? "ACK" : "NAK") + ", First byte of data block is corrupted");
                     throw new InvalidBlockException("InvalidBlockException: The first byte (character) of the packet is not SOH, STX, or EOT -> character: " + character);
                 } else {
                     interruptTransmission();

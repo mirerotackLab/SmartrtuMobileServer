@@ -1,0 +1,170 @@
+#!/system/bin/sh
+
+# 앱 패키지명 및 액티비티 경로
+APP_ACTIVITY=".MainActivity"
+FIND_PACKAGE_NAME="kr.co.mirerotack"
+IGNORE_PACKAGE_NAME="kr.co.mirerotack.apkdownloader"
+
+LOG_FILE_PATH="/data/local/tmp/update_smartrtu_service.log" # 로그 기록
+APK_PATH="/data/data/$IGNORE_PACKAGE_NAME/files/firmware.apk"
+
+function addLog() { # 로그 기록
+    local MESSAGE="$1"
+    local CURRENT_TIME=$(date +"%Y.%m.%d-%H.%M.%S")
+    echo "[$CURRENT_TIME] $MESSAGE" >> "$LOG_FILE_PATH"
+}
+
+# addLog " "
+# addLog "update_smartrtu 서비스 시작. 부팅 대기중"
+CURRENT_TIME=$(date +"%Y.%m.%d-%H.%M.%S")
+
+while [ "$(getprop sys.boot_completed)" != "1" ]; do # 부팅될 때 까지 대기
+    sleep 1
+done
+
+: > "$LOG_FILE_PATH" # 로그파일 초기화
+echo "[$CURRENT_TIME] update_smartrtu 서비스 시작. 부팅 대기중" >> "$LOG_FILE_PATH"
+
+addLog "✅ 시스템 부팅 완료"
+
+
+addLog "⏳ Package Manager(PM) 로딩 대기 시작..."  # 📌 pm이 완전히 실행될 때까지 대기
+
+PM_READY=false
+MAX_RETRIES=10  # 최대 10초 동안 체크
+RETRY_COUNT=0
+
+while [ "$RETRY_COUNT" -lt "$MAX_RETRIES" ]; do
+    if pm list packages >/dev/null 2>&1; then
+        PM_READY=true
+        break
+    fi
+    addLog "⏳ [예외] Package Manager가 아직 활성화되지 않았습니다. 2초 후 재시도... ($((RETRY_COUNT+1))/$MAX_RETRIES)"
+    sleep 1
+    RETRY_COUNT=$((RETRY_COUNT+1))
+done
+
+if [ "$PM_READY" = true ]; then
+    addLog "✅ Package Manager(pm)이 정상적으로 활성화되었습니다!" >> "$LOG_FILE_PATH"
+else
+    addLog "❌ Package Manager(PM)이 20초 동안 활성화되지 않았습니다. 스크립트를 종료합니다."
+    exit 1
+fi
+
+
+# pm 이 정상적으로 초기화 된 이후에 APP_PACKAGE_PRE 초기화
+# package:kr.co.mirerotack.smartrtu 에서 : 뒤로 잘라서 가져옴
+APP_PACKAGE_PRE=$(pm list packages | grep "$FIND_PACKAGE_NAME" | grep -v "$IGNORE_PACKAGE_NAME" | while read -r line; do echo ${line#package:}; done) >> "$LOG_FILE_PATH" 2>&1
+addLog "✅ 이전에 설치된 패키지 이름 : $APP_PACKAGE_PRE"
+
+# FLow 정리
+
+# 📌 1. 기존 앱이 있을 때
+#    1-1. SmartRTU APK 파일이 있으면 → 기존 앱 제거 후, 수신된 SmartRTU APK 설치 및 실행
+#    1-2. SmartRTU APK 파일이 없으면 → 업데이트 진행하지 않고 기존 앱 실행 후 종료
+
+if [ -f "$APK_PATH" ]; then
+    {
+        echo "🚨 APK 파일들 ls -al $APK_PATH"
+        ls -al "$APK_PATH"
+    } >> "$LOG_FILE_PATH"
+fi
+
+# 📌 1. 기존 앱이 있을 때
+if [ -n "$APP_PACKAGE_PRE" ]; then
+
+    # 1-2. SmartRTU APK 파일이 없으면 -> SmartRTU APP을 실행하고, 서비스 종료
+    if [ ! -f "$APK_PATH" ]; then
+        addLog "🚨 $APK_PATH 경로에 APK 파일이 존재하지 않습니다."
+        addLog "업데이트를 진행하지 않습니다. 기존 SmartRTU App을 실행한 뒤, 종료합니다."
+
+        # am start -S -n "$APP_PACKAGE_PRE/$APP_ACTIVITY" -a android.intent.action.MAIN  >> "$LOG_FILE_PATH"
+        exit 1
+
+    # 1-1. SmartRTU APK 파일이 있으면 -> 기존 앱 제거 후, 업데이트 수행, SmartRTU App 실행
+    else
+        echo "⏳ 기존 SmartRTU 앱을 제거합니다. 제거 결과 : " >> "$LOG_FILE_PATH"
+        pm uninstall "$APP_PACKAGE_PRE" >> "$LOG_FILE_PATH" 2>&1
+
+        sleep 4
+
+        APP_DATA_PATH="/data/data/$APP_PACKAGE_PRE"
+        # 📌 관련 데이터 디렉토리 삭제 (루트 권한 필요)
+        if [ -d "$APP_DATA_PATH" ]; then
+            rm -rf $APP_DATA_PATH
+            addLog "✅ AppData 제거 완료: $APP_DATA_PATH"
+        fi
+
+        APP_SD_PATH="/sdcard/Android/data/$APP_PACKAGE_PRE"
+        if [ -d "$APP_SD_PATH" ]; then
+            rm -rf $APP_SD_PATH
+            addLog "✅ SD카드 AppData 제거 완료: $APP_SD_PATH"
+        fi
+
+        addLog "✅ 기존 $APP_PACKAGE_PRE 제거 완료."
+    fi
+fi
+
+# ✅ 권한 변경 (744: 소유자는 실행 가능, 그룹과 기타 사용자는 읽기 가능)
+# ✅ 변경된 권한 확인
+if [ -f "$APK_PATH" ]; then
+    chmod 744 "$APK_PATH"
+    ls -al "$APK_PATH" >> "$LOG_FILE_PATH"
+fi
+
+sleep 2
+
+# 📌 APK 설치
+addLog "🔄 $APK_PATH 경로의 SmartRTU 앱을 설치합니다."
+
+INSTALL_RESULT=$(pm install -r "$APK_PATH")
+addLog "apk 설치 결과 : $INSTALL_RESULT"
+
+if [ "$INSTALL_RESULT" == "Success" ]; then
+    # 📌 설치 완료 후 APK 파일 삭제
+    addLog "업데이트가 완료되어 APK 파일을 제거합니다. (제거할 파일 : $APK_PATH)"
+else
+    # 2-2. SmartRTU APK 파일이 있는데 SmartRTU APK 설치에 실패한 경우
+    addLog "❌ $APK_PATH 설치 실패, 사유 : $INSTALL_RESULT"
+    addLog "손상된 smartrtu.apk를 제거합니다."
+fi
+
+rm "$APK_PATH"
+
+# 📌 설치 후 `pm list packages` 강제 갱신
+pm clear android >/dev/null 2>&1
+sleep 3
+
+MAX_RETRIES=2
+RETRY_COUNT=0
+APP_PACKAGE_POST=""
+
+while [ "$RETRY_COUNT" -lt "$MAX_RETRIES" ]; do
+    APP_PACKAGE_POST=$(pm list packages | grep "$FIND_PACKAGE_NAME" | grep -v "$IGNORE_PACKAGE_NAME" | while read -r line; do echo ${line#package:}; done)
+    if [ -n "$APP_PACKAGE_POST" ]; then
+        addLog "✅ 새로 설치한 패키지 이름 : $APP_PACKAGE_POST"
+        break
+    fi
+
+    # 📌 설치 후 `pm list packages` 강제 갱신
+    addLog "✅ 설치된 패키지가 없습니다. (3초 후 재시도)"
+    pm clear android >/dev/null 2>&1
+    sleep 3
+
+    RETRY_COUNT=$((RETRY_COUNT+1))
+done
+
+if [ -n "$APP_PACKAGE_POST" ]; then
+    if pm list packages | grep -q "$APP_PACKAGE_POST"; then
+        addLog "✅ $APP_PACKAGE_POST App이 정상적으로 설치된 것을 재확인했습니다."
+        addLog "🚀 $APP_PACKAGE_POST App을 시작합니다!"
+
+        am start -S -n "$APP_PACKAGE_POST/$APP_ACTIVITY" -a android.intent.action.MAIN >> "$LOG_FILE_PATH"
+    else
+        addLog "❌ $APP_PACKAGE_POST 앱 설치 실패 (확인 요망)"
+        exit 1
+    fi
+else
+    addLog "❌ APK에서 추출한 패키지 명 : $APP_PACKAGE_POST, APK 손상 의심"
+    exit 1
+fi
