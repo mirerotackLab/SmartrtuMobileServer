@@ -1,0 +1,124 @@
+#!/system/bin/sh
+
+# YModemTCPService 서비스 모니터링
+# CHECK_INTERVAL(초) 주기로 YModemTCPService 서비스가 실행중인지 확인하고, 아니라면 실행
+
+# 05/07 : [정차장님 요청] 부트리시버가 smartrtu를 동작시키지 못할 때, 이를 감지하고 3회까지 재실행 로직을 실행시키는 기능 추가
+
+LOG_FILE_PATH="/data/local/tmp/service_state.log" # 로그 기록
+SERVICE_NAME="download_apk"
+CHECK_INTERVAL=100
+
+EXECUTED_ONCE=true
+BASE_PACKAGE_NAME="kr.co.mirerotack"
+IGNORE_PACKAGE_NAME="apkdownloader"
+APP_PACKAGE=""
+APP_ACTIVITY=""
+
+function addLog() { # 로그 기록
+    local MESSAGE="$1"
+    local CURRENT_TIME=$(date +"%Y.%m.%d-%H.%M.%S")
+    echo "[$CURRENT_TIME] $MESSAGE" >> "$LOG_FILE_PATH"
+}
+
+while [ "$(getprop sys.boot_completed)" != "1" ]; do # 부팅될 때 까지 대기
+    sleep 1
+done
+
+: > "$LOG_FILE_PATH" # 로그파일 초기화
+
+addLog "service_state 서비스 시작, ✅ 시스템 부팅 완료"
+
+while true; do
+    SERVICE_STATUS=$(getprop init.svc.$SERVICE_NAME) # 현재 서비스 상태 확인
+
+    if [ "$SERVICE_STATUS" != "running" ]; then
+        addLog "[처음 보는 case임] download_apk 서비스 비정상 종료 확인. 재실행."
+        start download_apk
+    else
+        addLog "download_apk Service is Running..."
+    fi
+
+    sleep 20 # 일정 시간 대기
+
+    # 04/09 : 부팅 후 일정 시간 이후에 1번만 Smartrtu가 실행중인지 확인하고, 실행중이 아니라면 am start(3회 까지 재시도) 하는 로직 추가 구현
+    if [ "$EXECUTED_ONCE" = true ]; then
+        addLog "SmartRTU App 실행 여부를 검증합니다."
+
+        # 0. kr.co.mirerotack.* 중에서 apkdownloader 제외하고 하나 찾기 -> smartrtu or menutestactivity
+        APP_PACKAGE=$(pm list packages | grep "$BASE_PACKAGE_NAME" | grep -v "$IGNORE_PACKAGE_NAME" | while read -r line; do echo ${line#package:}; done)
+
+        # ======= 배포 시, 주석 처리 해야함 Start =======
+#        addLog "테스트를 위해 임시로 smartrtu 실행을 중지합니다."
+#        am force-stop "$APP_PACKAGE" >> "$LOG_FILE_PATH"
+#
+#        sleep 5 # Smartrtu App 강제 종료 후
+        # ======== 배포 시, 주석 처리 해야함 End ========
+
+        addLog "실행중인지 검색할 앱 패키지 이름 : $APP_PACKAGE"
+
+        # 1. 앱 실행 상태 체크
+        if ps | grep -q "$APP_PACKAGE"; then
+            addLog "$APP_PACKAGE 앱이 이미 실행 중입니다."
+
+        else
+            addLog "$APP_PACKAGE 앱이 시작되지 않았음."
+
+            # 2. 액티비티 이름 추출
+            APP_ACTIVITY=$(dumpsys package "$APP_PACKAGE" | while read line; do
+                echo "$line" | grep "android.intent.action.MAIN" >/dev/null 2>&1 && CONT=1
+                [ "$CONT" = 1 ] && echo "$line" | grep "$APP_PACKAGE/" >/dev/null 2>&1 && {
+                    set -- $line
+                    echo "${2#*/}"
+                    break
+                }
+            done)
+            addLog "$APP_PACKAGE 에서 액티비티 이름 추출 -> $APP_ACTIVITY"
+
+            # 3. 앱 실행
+            if [ -n "$APP_ACTIVITY" ]; then
+                MAX_RETRIES=3
+                RETRY_COUNT=0
+                LAUNCHED=false
+
+                addLog "$APP_PACKAGE/$APP_ACTIVITY 를 시작합니다."
+
+                # 최대 3번 SmartRTU App 실행 시도
+                while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+                    if ps | grep -q "$APP_PACKAGE"; then
+                        addLog "$APP_PACKAGE 앱이 이미 실행 중입니다."
+
+                    else
+                        addLog "$APP_PACKAGE 앱이 시작되지 않았음."
+
+                        am start -S -n "$APP_PACKAGE/$APP_ACTIVITY" -a android.intent.action.MAIN > /dev/null 2>&1
+                        sleep 2
+
+                        if ps | grep -q "$APP_PACKAGE"; then
+                            addLog "✅ 앱 실행 성공 (시도 $((RETRY_COUNT+1))회): $APP_PACKAGE"
+                            LAUNCHED=true
+                            break
+                        fi
+
+                        RETRY_COUNT=$((RETRY_COUNT + 1))
+                        addLog "❌ 앱 실행 실패 (시도 ${RETRY_COUNT}/$MAX_RETRIES)"
+
+                        sleep 1
+                    fi
+                done
+
+                if [ "$LAUNCHED" = false ]; then
+                    addLog "❌ 최대 시도 횟수 초과. 앱 실행 실패: $APP_PACKAGE"
+                else
+                    addLog "$APP_PACKAGE APP이 성공적으로 실행 되었습니다."
+                fi
+            else
+                addLog "❌ 액티비티 이름 추출 실패"
+            fi
+        fi
+
+        EXECUTED_ONCE=false
+    fi
+
+    sleep "${CHECK_INTERVAL}" # 일정시간 대기
+done

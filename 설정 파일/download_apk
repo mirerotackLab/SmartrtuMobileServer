@@ -1,0 +1,222 @@
+#!/system/bin/sh
+
+APP_PACKAGE="kr.co.mirerotack.apkdownloader"
+APP_ACTIVITY=".MainActivity"
+APK_FILE_PATH="/system/vendor/apkDownloader.apk"  # APK 파일 경로 (수정 가능)
+
+INI_FILE="/Android/data/kr.co.mirerotack/SmartRTU/staticIP.ini"
+LOG_FILE_PATH="/data/local/tmp/download_apk_service.log" # test 하느라 빼둠 : /data/local/tmp
+CHECK_INTERVAL=60  # 60초 즉, 1분 마다 앱이 실행중인지 확인하고, 아니라면 실행시킴
+
+function addLog() { # 로그 기록
+    local MESSAGE="$1"
+    local CURRENT_TIME=$(date +"%Y.%m.%d-%H.%M.%S")
+    echo "[$CURRENT_TIME] $MESSAGE" >> "$LOG_FILE_PATH"
+}
+
+#addLog " "
+#addLog "download_apk 서비스 시작. 부팅 대기중"
+CURRENT_TIME=$(date +"%Y.%m.%d-%H.%M.%S")
+
+while [ "$(getprop sys.boot_completed)" != "1" ]; do # 부팅될 때 까지 대기
+    sleep 1
+done
+
+: > "$LOG_FILE_PATH" # 로그파일 초기화
+echo "[$CURRENT_TIME] download_apk 서비스 시작. 부팅 대기중" >> "$LOG_FILE_PATH"
+
+addLog "✅ 시스템 부팅 완료"
+
+
+while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+    if [ -f "/sdcard/Android/data/kr.co.mirerotack/SmartRTU/staticIP.ini" ]; then
+        INI_FILE="/sdcard/Android/data/kr.co.mirerotack/SmartRTU/staticIP.ini"
+        break
+    elif [ -f "/mnt/sdcard/Android/data/kr.co.mirerotack/SmartRTU/staticIP.ini" ]; then
+        INI_FILE="/mnt/sdcard/Android/data/kr.co.mirerotack/SmartRTU/staticIP.ini"
+        break
+    else
+        addLog "(부팅 대기 - 5초 후 재시도 ${RETRY_COUNT}/${MAX_RETRIES}) ❌ 아직 설정 파일을 찾을 수 없습니다."
+        sleep 5
+        RETRY_COUNT=$((RETRY_COUNT + 1))
+    fi
+done
+
+if [ -z "$INI_FILE" ] || [ ! -f "$INI_FILE" ]; then
+    addLog "❌ 설정 파일 확인 실패 (경로 없음 또는 파일 없음): $INI_FILE"
+    echo ""
+    exit 1
+fi
+
+addLog "✅ 설정 파일을 찾았습니다: $INI_FILE"
+ls -al "$INI_FILE" >> "$LOG_FILE_PATH" 2>&1
+
+# Android 코드 리팩토링 시작 부분
+# INI 파일에서 값을 가져오는 함수
+# shellcheck disable=SC2112
+function get_ini_value() {
+    # echo "찾아야 할 키값 : \$1: $1" >> "$LOG_FILE_PATH" # $1 : 함수 인자로 전달된 값
+
+    # "=" 문자를 기준으로 key와 value 값으로 가져옴
+    while read -r line; do  # 파일에서 한 줄씩 읽음
+        # echo "읽어온 line : $line" >> "$LOG_FILE_PATH"
+
+        # " = "가 포함되지 않은 경우 무시 -> 첫 라인 [GLOVAL] 무시하고 넘기는 코드
+        if ! echo "$line" | grep -q " = "; then
+            continue
+        fi
+
+        # " = "을 기준으로 key와 value 분리
+        case "$line" in
+            *" = "*)
+                key="${line%% = *}"  # " = " 앞부분 추출
+                value="${line#* = }" # " = " 뒷부분 추출
+                ;;
+            *)
+            continue
+            ;;
+        esac
+
+        # echo "key: '$key', value: '$value'" >> "$LOG_FILE_PATH" # 불필요한 로그
+
+        # 찾고자 하는 key 값과 비교
+        if [ "$key" = "$1" ]; then
+            # echo "✅ $1 값 찾음: $value" >> "$LOG_FILE_PATH" # 불필요한 로그
+            echo "$value"
+            return # sh에서 String 타입의 값을 리턴하지 못해서, echo를 통해서 리턴함
+        fi
+    done < "$INI_FILE"  # INI 파일에서 한 줄씩 읽어서 처리
+
+    echo "staticIP에서 값을 가져오지 못함"  # 값을 찾지 못하면 오류 메세지 반환
+    return # sh에서 String 타입의 값을 리턴하지 못해서, echo를 통해서 리턴함
+}
+
+# 설정값 읽기
+LAN1USETYPE=$(get_ini_value "LAN1USETYPE")
+LAN2USETYPE=$(get_ini_value "LAN2USETYPE")
+IPADDRESS=$(get_ini_value "IPADDRESS")
+SUBNET_MASK=$(get_ini_value "SUBNET_MASK")
+GATEWAY=$(get_ini_value "GATEWAY")
+IPADDRESS2=$(get_ini_value "IPADDRESS2")
+SUBNET_MASK2=$(get_ini_value "SUBNET_MASK2")
+GATEWAY2=$(get_ini_value "GATEWAY2")
+
+# 로그 파일에 기록 (제대로 읽어왔는지 검증을 위함)
+addLog "StaticIP.ini 파일에서 읽어온 값 중 일부 출력"
+{
+    echo "LAN1USETYPE: $LAN1USETYPE"
+    echo "IPADDRESS: $IPADDRESS"
+    echo "LAN2USETYPE: $LAN2USETYPE"
+    echo "IPADDRESS2: $IPADDRESS2"
+} >> "$LOG_FILE_PATH" 2>&1
+
+function configure_network() {
+    local ETHN=$1
+    local IPADDR=$2
+    local NETMASK=$3
+    local GATEWAY=$4
+    local TABLE_ID=$5
+
+    addLog "Disabling network interface... $ETHN"
+    ifconfig "$ETHN" down
+    ifconfig "$ETHN" "$IPADDR" netmask "$NETMASK" up
+    route add default gw "$GATEWAY" dev "$ETHN"
+    addLog "Configured $ETHN: $IPADDR / $NETMASK via $GATEWAY"
+
+    addLog "Adding routing rules... $ETHN"
+    ip route add default via "$GATEWAY" tab "$TABLE_ID" dev "$ETHN"
+    ip rule add from "$IPADDR"/32 tab "$TABLE_ID"
+    ip rule add to "$IPADDR"/32 tab "$TABLE_ID"
+}
+
+if [ "$LAN1USETYPE" -ne 0 ]; then
+    configure_network "eth0" "$IPADDRESS" "$SUBNET_MASK" "$GATEWAY" 1
+fi
+
+if [ "$LAN2USETYPE" -ne 0 ]; then
+    configure_network "eth1" "$IPADDRESS2" "$SUBNET_MASK2" "$GATEWAY2" 2
+fi
+
+# 라우팅 캐시 플러시
+addLog "Flushing route cache..."
+ip route flush cache
+# Android 코드 리팩토링 끝 부분
+
+# 결과 로깅
+ifconfig >> "$LOG_FILE_PATH" 2>&1
+addLog "Network configuration completed."
+
+PM_READY=false
+MAX_RETRIES=10  # 최대 10초 동안 체크
+RETRY_COUNT=0
+
+# 📌 pm이 완전히 실행될 때까지 대기
+addLog "⏳ Package Manager(PM) 로딩 대기 시작..."
+
+while [ "$RETRY_COUNT" -lt "$MAX_RETRIES" ]; do
+    if pm list packages >/dev/null 2>&1; then
+        PM_READY=true
+        break
+    fi
+    addLog "⏳ [예외] Package Manager가 아직 활성화되지 않았습니다. 2초 후 재시도... ($((RETRY_COUNT+1))/$MAX_RETRIES)"
+    sleep 1
+    RETRY_COUNT=$((RETRY_COUNT+1))
+done
+
+if [ "$PM_READY" = true ]; then
+    addLog "✅ Package Manager(pm)이 정상적으로 활성화되었습니다!"
+else
+    addLog "❌ Package Manager(PM)이 20초 동안 활성화되지 않았습니다. 스크립트를 종료합니다."
+    exit 1
+fi
+
+
+# 📌 1. apkdownloader 앱이 설치되어 있는지 확인 -> 없으면 재설치
+if ! pm list packages | grep -q "$APP_PACKAGE"; then
+    addLog "❌ $APP_PACKAGE 앱이 설치되어 있지 않습니다. APK를 설치합니다..."
+
+    if [ -f "$APK_FILE_PATH" ]; then
+        addLog "📂 APK 파일을 찾았습니다: $APK_FILE_PATH"
+        pm install -r "$APK_FILE_PATH" >> "$LOG_FILE_PATH" 2>&1
+
+        if pm list packages | grep -q "$APP_PACKAGE"; then
+            addLog "✅ $APP_PACKAGE 앱이 성공적으로 설치되었습니다."
+        else
+            addLog "❌ APK 설치 실패. 확인이 필요합니다."
+            exit 1
+        fi
+    else
+        addLog "❌ APK 파일을 찾을 수 없습니다: $APK_FILE_PATH"
+        exit 1
+    fi
+else
+    addLog "✅ $APP_PACKAGE 앱이 이미 설치되어 있습니다."
+fi
+
+am start -S -n "$APP_PACKAGE/$APP_ACTIVITY" -a android.intent.action.MAIN
+addLog "TCP 앱을 시작합니다."
+sleep 3
+
+
+# 📌 2. 앱 실행 및 모니터링
+while true; do
+    # 현재 실행 중인지 확인
+    # grep -q "$APP_PACKAGE" -> 찾은 경우(실행중) 0, 아닌 경우 1 반환
+    # Shell에서는 if 0 인 경우가 True임 -> 0 자체가 True인 듯 (오류 없음을 뜻함)
+    # 그래서 앱이 실행되고 있지 않은 경우 1이 반환되고 (! 1 -> 0) 0으로 처리돼서 재실행됨
+    if ! ps | grep -q "$APP_PACKAGE"; then
+        addLog "TCP 앱(프로세스)가 종료되어 있었음..."
+        addLog "TCP 앱을 시작합니다."
+
+        # -S : 기존 인스턴스가 있으면 종료 후 실행 (렉 방지 예외처리 차원)
+        if ! am start -S -n "$APP_PACKAGE/$APP_ACTIVITY" -a android.intent.action.MAIN; then
+            addLog "❌ 앱 실행 실패: $APP_PACKAGE"
+        fi
+
+    else
+        # 서비스 구동상태 확인 및 App 무결성 검증을 위함 1년에 2.3MB 차지함
+        addLog "TCP App Running..."
+    fi
+
+    sleep "$CHECK_INTERVAL"
+done

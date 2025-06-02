@@ -485,11 +485,3 @@ service dumpstate /system/bin/dumpstate -s
     socket dumpstate stream 0660 shell log
     disabled
     oneshot
-
-
-service bt_agent /system/bin/sh /system/vendor/bin/bluetooth_agent
-    class main
-    user bluetooth
-    group bluetooth net_bt
-    oneshot
-

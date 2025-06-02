@@ -1,0 +1,62 @@
+#!/system/bin/sh
+
+PASSWORD=0730
+LOG_FILE_PATH="/data/local/tmp/set_bluetooth.log" # 로그 기록
+
+# 부팅될 때 까지 대기
+while [ "$(getprop sys.boot_completed)" != "1" ]; do
+    sleep 1
+done
+
+function addLog() { # 로그 기록
+    local MESSAGE="$1"
+    local CURRENT_TIME=$(date +"%Y.%m.%d-%H.%M.%S")
+    echo "[$CURRENT_TIME] $MESSAGE" >> "$LOG_FILE_PATH"
+}
+
+: > "$LOG_FILE_PATH" # 로그파일 초기화
+
+# 블루투스 USB 동글이 꼽힐때 까지(hci0가 생성될 때까지) 대기
+addLog "Waiting for hci0 interface..."
+
+while true; do
+    if hciconfig | grep -q hci0; then
+        addLog "hci0 detected!"
+
+        # 전에 돌고 있던 agent 제거
+        addLog "Killing all 'agent' processes..."
+
+        # 'agent'라는 이름을 가진 프로세스의 PID 목록을 찾아 종료
+        ps | grep '[a]gent' | while read line; do
+            set -- $line
+            pid=$2
+            addLog "Killing agent with PID: $pid"
+            kill -9 $pid
+        done
+
+        break
+    fi
+    sleep 1
+done
+
+addLog "Start hci0 hciconfig setting..."
+
+hciconfig hci0 down    # hci0 비활성화
+sleep 2
+
+hciconfig hci0 up      # hci0 활성화
+sleep 2
+
+hciconfig hci0 piscan  # 다른 기기가 이 기기를 찾을 수 있고, 연결할 수 있게 설정
+sleep 2
+
+hciconfig hci0 name SmartRTU
+hciconfig hci0 class 0x000100
+
+addLog "End hci0 hciconfig setting..."
+hciconfig -a >> "$LOG_FILE_PATH"
+
+
+# 새로운 agent 실행
+addLog "Run agent --adapter hci0 $PASSWORD"
+/system/xbin/agent --adapter hci0 $PASSWORD

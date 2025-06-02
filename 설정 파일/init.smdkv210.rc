@@ -1,0 +1,163 @@
+import init.smdkv210.usb.rc
+
+on early-init
+    export EXTERNAL_STORAGE /mnt/sdcard
+    export SECONDARY_STORAGE /mnt/ext_sd:/mnt/usb
+	
+    mkdir /mnt/sdcard 0000 system system
+    mkdir /mnt/ext_sd 0000 system system
+    mkdir /mnt/usb 0000 system system
+    # for backwards compatibility
+    symlink /mnt/sdcard /sdcard
+    symlink /mnt/ext_sd /ext_sd
+
+on post-fs-data
+    # we will remap this as /mnt/sdcard with the sdcard fuse tool
+    mkdir /data/media 0775 media_rw media_rw
+    chown media_rw media_rw /data/media
+    setprop vold.post_fs_data_done 1
+    mkdir /data/misc/dhcp 0770 dhcp dhcp
+    chown dhcp dhcp /data/misc/dhcp
+
+# Sensors
+    #chmod 0666 /dev/cma3000
+
+# GPS io
+    setprop ro.kernel.android.gps1 ttySAC3
+    setprop ro.kernel.android.gps2 ttySAC3
+    chmod 0666 /dev/ttySAC0
+    chmod 0666 /dev/ttySAC1
+    chmod 0666 /dev/ttySAC2
+    chmod 0666 /dev/ttySAC3
+
+#NXP 16C2550 support.
+    chmod 0666 /dev/ttyS0
+    chmod 0666 /dev/ttyS1
+
+# for DIO, AIO
+    chmod 0666 /dev/v210dio
+    chmod 0666 /dev/v210adc
+	
+# network enable
+#    setprop net.dns1 168.126.63.1
+#    setprop net.dns2 168.126.63.2
+
+# 3D init
+service pvrsrvinit /system/vendor/bin/pvrsrvinit
+    class core
+    user root
+    group root
+    oneshot
+
+#===================================================================
+#
+# WIFI wpa suppplicant service
+#
+#===================================================================
+#service wpa_supplicant /system/bin/wpa_supplicant -Dwext -iwlan0 -c /data/misc/wifi/wpa_supplicant.conf
+#    class main
+#    socket wpa_wlan0 dgram 0660 wifi wifi
+#    disabled
+#    oneshot
+
+#service dhcpcd_wlan0 /system/bin/dhcpcd -ABKL
+#    class main
+#    disabled
+#    oneshot
+
+# eth0
+#service dhcpcd_eth0 /system/bin/dhcpcd -ABKL
+#    class main
+#    disabled
+#    oneshot
+
+# IP Renew
+# eth0
+#service iprenew_eth0 /system/bin/dhcpcd -n
+#    class main
+#    disabled
+#    oneshot
+
+on boot
+	mount debugfs /sys/kernel/debug /sys/kernel/debug
+	chmod 0666 /dev/pvrsrvkm
+    	setprop ro.build.product smdkv210
+    	setprop ro.product.device smdkv210
+
+		setprop persist.sys.timezone Asia/Seoul
+
+	chmod 0666 /sys/class/backlight/pwm-backlight.0/brightness
+	chown system system /sys/class/backlight/pwm-backlight.0/brightness
+
+on fs
+# mount ext4 partitions
+	mount ext4 /dev/block/mmcblk0p2 /system wait rw
+	chmod 0755 /system/usr/bin/busybox
+	mount ext4 /dev/block/mmcblk0p2 /system ro wait remount
+	mount ext4 /dev/block/mmcblk0p3 /data wait noatime nosuid nodev
+	mount ext4 /dev/block/mmcblk0p4 /cache wait noatime nosuid nodev
+    	export EXTERNAL_STORAGE /mnt/sdcard
+	export SECONDARY_STORAGE /mnt/ext_sd:/mnt/usb
+
+	mkdir /mnt/sdcard 0000 system system
+	mkdir /mnt/ext_sd 0000 system system
+	mkdir /mnt/usb 0000 system system
+
+	symlink /mnt/sdcard /sdcard
+	symlink /mnt/ext_sd /ext_sd
+
+# wlan interface
+#    mkdir /data/misc/wifi 0771 wifi wifi
+#    mkdir /data/misc/wifi/sockets 0771 wifi wifi
+#    chmod 0771 /data/misc/wifi
+#    mkdir /data/misc/dhcp 0771 dhcp dhcp
+#    chown dhcp dhcp /data/misc/dhcp
+#    mkdir /data/misc/dhcpcd 0771 dhcp dhcp
+#    chown dhcp dhcp /data/misc/dhcpcd
+
+# Wireless LAN
+#service mlan_insmod /system/bin/insmod /system/lib/hw/wlan/mlan.ko
+#    class main
+#    oneshot
+
+#service wpa_supplicant /system/bin/wpa_supplicant -D wext -i mlan0 -c/data/misc/wifi/wpa_supplicant.conf
+#    class main
+#    socket wpa_mlan0 dgram 660 root wifi
+#    disabled
+#    oneshot
+
+#service dhcpcd_mlan0 /system/bin/dhcpcd -dd -f /system/etc/dhcpcd.conf mlan0
+#service dhcpcd_mlan0 /system/bin/dhcpcd -ABKL
+#    class main
+#    disabled
+#    oneshot
+
+#service ril-daemon /system/bin/rild -l /system/lib/libreference-ril.so
+#	class main
+#	socket rild stream 660 root radio 
+#	socket rild-debug stream 660 radio system 
+#	user root 
+#	group radio cache inet misc audio sdcard_rw log
+
+service update_smartrtu /system/bin/sh /system/vendor/bin/update_smartrtu
+    user root
+    group root
+    oneshot
+
+service download_apk /system/bin/sh /system/vendor/bin/download_apk
+    user root
+    group root
+
+service service_state /system/bin/sh /system/vendor/bin/service_state
+    user root
+    group root
+
+service set_bluetooth /system/bin/sh /system/vendor/bin/set_bluetooth
+    user root
+    group root
+
+on boot
+    start download_apk
+    start update_smartrtu
+    start service_state
+    start set_bluetooth

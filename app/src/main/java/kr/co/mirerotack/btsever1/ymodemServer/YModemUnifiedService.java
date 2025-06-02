@@ -70,11 +70,6 @@ public class YModemUnifiedService extends Service {
         } else {
             return YModemServerFactory.ServerType.TCP;
         }
-
-        // 예시 2: 빌드 설정이나 환경 변수 사용
-        // return BuildConfig.USE_BLUETOOTH ?
-        //     YModemServerFactory.ServerType.BLUETOOTH :
-        //     YModemServerFactory.ServerType.TCP;
     }
 
     /**
