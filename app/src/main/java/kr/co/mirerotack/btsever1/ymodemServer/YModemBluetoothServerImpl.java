@@ -262,7 +262,7 @@ public class YModemBluetoothServerImpl extends AbstractYModemServer {
 
                             // 🎯 핵심: YModem 파일 처리 시작 (부모 클래스의 공통 로직 사용)
                             try {
-                                handleIncomingFile(bluetoothClientSocket); // YModem 프로토콜 처리
+                                handleYModemTransmission(bluetoothClientSocket); // YModem 프로토콜 처리
                             } catch (Exception e) {
                                 logMessage("[X] YModem 파일 처리 중 오류: " + e.getMessage());
                                 handleError(e); // 부모 클래스의 오류 처리 로직 호출

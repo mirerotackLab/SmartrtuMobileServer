@@ -23,7 +23,7 @@ import static kr.co.mirerotack.btsever1.utils.Logger.logMessage;
  */
 public class YModemTCPServerImpl extends AbstractYModemServer {
     private static final String TAG = "YModemTcpServer"; // 로그 출력용 태그
-    private static final int SEND_RECEIVE_BUFFER_SIZE = 100 * 1024; // 송수신 버퍼 크기 (100KB)
+    private static final int SEND_RECEIVE_BUFFER_SIZE = 32 * 1024; // 송수신 버퍼 크기 (100KB)
 
     private Socket socket; // 클라이언트와 연결된 TCP 소켓
     private ServerSocket serverSocket; // 클라이언트 연결을 대기하는 TCP 서버 소켓

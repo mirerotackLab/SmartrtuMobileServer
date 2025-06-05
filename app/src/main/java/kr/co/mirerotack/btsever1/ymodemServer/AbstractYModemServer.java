@@ -111,7 +111,7 @@ public abstract class AbstractYModemServer implements YModemServerInterface {
                                 logMessage("[O] " + getServerType() + " Client connected: " + getClientInfo(clientConnection));
 
                                 // 🎯 핵심: 공통 YModem 파일 처리 로직
-                                handleIncomingFile(clientConnection);
+                                handleYModemTransmission(clientConnection);
 
                             } catch (IOException e) {
                                 logMessage(getServerType() + " Server communication error: " + e.getMessage());
@@ -149,7 +149,7 @@ public abstract class AbstractYModemServer implements YModemServerInterface {
      * TCP든 Bluetooth든 동일한 로직으로 처리
      * @param clientConnection 클라이언트 연결 객체 (Socket 또는 BluetoothSocket)
      */
-    protected void handleIncomingFile(Object clientConnection) {
+    protected void handleYModemTransmission(Object clientConnection) {
         InputStream inputStream = null;
         OutputStream outputStream = null;
 
@@ -157,7 +157,7 @@ public abstract class AbstractYModemServer implements YModemServerInterface {
         if (!saveDirectory.exists()) saveDirectory.mkdirs();
 
         try {
-            // 하위 클래스에서 스트림 획득
+            // 하위 클래스에서 스트림 획득 (블루투스 or TCP 서버 소켓의 in-output Stream 획득 가능
             inputStream = getInputStream(clientConnection);
             outputStream = getOutputStream(clientConnection);
 
