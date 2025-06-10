@@ -36,6 +36,7 @@ public class MainActivity extends AppCompatActivity {
 
     // 권한 요청 코드
     private static final int REQUEST_BT_PERMISSIONS = 100;
+    private static final String TAG = "MainActivity";
 
     static {
         System.loadLibrary("MyJniLib");  // libMyJniLib.so 와 일치해야 함
@@ -47,6 +48,36 @@ public class MainActivity extends AppCompatActivity {
     public class NativeBtServer {
         public native int startBluetoothServer();  // JNI 연결되는 함수
     }
+
+    /**
+     * 블루투스 연결 상태 변화를 수신하는 브로드캐스트 리시버
+     */
+    private final BroadcastReceiver bluetoothStatusReceiver = new BroadcastReceiver() {
+        @Override
+        public void onReceive(Context context, Intent intent) {
+            final String action = intent.getAction();
+            final String TAG = "BluetoothAdapter";
+
+            if (action.equals(BluetoothAdapter.ACTION_STATE_CHANGED)) {
+                final int state = intent.getIntExtra(BluetoothAdapter.EXTRA_STATE,
+                        BluetoothAdapter.ERROR);
+                switch (state) {
+                    case BluetoothAdapter.STATE_OFF:
+                        Log.w(TAG, "Bluetooth off");
+                        break;
+                    case BluetoothAdapter.STATE_TURNING_OFF:
+                        Log.w(TAG, "Turning Bluetooth off...");
+                        break;
+                    case BluetoothAdapter.STATE_ON:
+                        Log.w(TAG, "Bluetooth on");
+                        break;
+                    case BluetoothAdapter.STATE_TURNING_ON:
+                        Log.w(TAG, "Turning Bluetooth on...");
+                        break;
+                }
+            }
+        }
+    };
 
     /**
      * YModem 서버 상태 메시지를 수신하는 브로드캐스트 리시버
@@ -75,11 +106,31 @@ public class MainActivity extends AppCompatActivity {
         // 브로드캐스트 수신 등록 (서비스에서 상태 변화를 업데이트하기 위함)
         registerReceiver(receiver, new IntentFilter("BT_SERVER_MESSAGE"));
 
+
+        // Register for broadcasts on BluetoothAdapter state change
+        IntentFilter filter = new IntentFilter(BluetoothAdapter.ACTION_STATE_CHANGED);
+        registerReceiver(bluetoothStatusReceiver, filter);
+
         // 저장된 서버 타입 설정 로드
         loadSavedServerType();
 
         // 버튼 클릭 리스너 설정
         setupButtonListeners();
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+
+        // 브로드캐스트 리시버 해제
+        try {
+            unregisterReceiver(receiver);
+            unregisterReceiver(bluetoothStatusReceiver);
+        } catch (Exception e) {
+            Log.e("MainActivity", "브로드캐스트 리시버 해제 실패", e);
+        }
+
+        Log.d("MainActivity", "MainActivity 종료됨");
     }
 
     /**
@@ -292,14 +343,17 @@ public class MainActivity extends AppCompatActivity {
     private boolean checkBluetoothAdapter() {
         BluetoothAdapter bluetoothAdapter = BluetoothAdapter.getDefaultAdapter();
 
+        Log.w(TAG, "bluetoothAdapter.getState() : " + bluetoothAdapter.getState());
+
         if (bluetoothAdapter == null) {
             txtStatus.setText("이 기기는 Bluetooth를 지원하지 않습니다.");
             return false;
         }
 
         if (!bluetoothAdapter.isEnabled()) {
-            txtStatus.setText("Bluetooth가 꺼져 있습니다. 설정에서 활성화해주세요.");
-            return false;
+            Log.e(TAG, "Bluetooth가 꺼져 있습니다. 설정에서 활성화해주세요.");
+            // txtStatus.setText("Bluetooth가 꺼져 있습니다. 설정에서 활성화해주세요.");
+            return true; // 임시로 true 반환
         }
 
         return true;
@@ -362,20 +416,6 @@ public class MainActivity extends AppCompatActivity {
                 resetButtonState();
             }
         }
-    }
-
-    @Override
-    protected void onDestroy() {
-        super.onDestroy();
-
-        // 브로드캐스트 리시버 해제
-        try {
-            unregisterReceiver(receiver);
-        } catch (Exception e) {
-            Log.e("MainActivity", "브로드캐스트 리시버 해제 실패", e);
-        }
-
-        Log.d("MainActivity", "MainActivity 종료됨");
     }
 
     /**

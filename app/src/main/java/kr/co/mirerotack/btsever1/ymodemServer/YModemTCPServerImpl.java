@@ -83,6 +83,17 @@ public class YModemTCPServerImpl extends AbstractYModemServer {
      * @throws IOException 스트림 획득 실패 시 예외 발생
      */
     @Override
+    protected boolean isConnected(Object clientConnection) {
+        return ((Socket) clientConnection).isConnected();
+    }
+
+    /**
+     * 클라이언트 소켓에서 입력 스트림을 획득합니다
+     * @param clientConnection 클라이언트 연결 객체 (Socket으로 캐스팅됨)
+     * @return 데이터 수신용 InputStream
+     * @throws IOException 스트림 획득 실패 시 예외 발생
+     */
+    @Override
     protected InputStream getInputStream(Object clientConnection) throws IOException {
         return ((Socket) clientConnection).getInputStream();
     }
