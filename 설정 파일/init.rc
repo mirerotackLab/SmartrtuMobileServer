@@ -444,11 +444,13 @@ service dbus /system/bin/dbus-daemon --system --nofork
 
 service bluetoothd /system/bin/bluetoothd -n
     class main
+    user root
     socket bluetooth stream 660 bluetooth bluetooth
     socket dbus_bluetooth stream 660 bluetooth bluetooth
     # init.rc does not yet support applying capabilities, so run as root and
     # let bluetoothd drop uid to bluetooth with the right linux capabilities
-    group bluetooth net_bt_admin misc
+    group bluetooth net_bt_admin net_admin inet misc
+    oneshot
 
 service installd /system/bin/installd
     class main

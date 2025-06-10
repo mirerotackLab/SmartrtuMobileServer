@@ -1,5 +1,6 @@
 package kr.co.mirerotack.btsever1.ymodemServer;
 
+import android.bluetooth.BluetoothSocket;
 import android.content.Context;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
@@ -15,6 +16,10 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.RandomAccessFile;
+import java.net.Socket;
+import java.text.SimpleDateFormat;
+import java.util.Date;
+import java.util.Locale;
 
 import kr.co.mirerotack.btsever1.RtuSnapshot;
 import kr.co.mirerotack.btsever1.model.ApkValidationResult;
@@ -56,6 +61,7 @@ public abstract class AbstractYModemServer implements YModemServerInterface {
     protected Gson gson = new Gson();
 
     private Thread serverThread;
+    private Thread triggerThread;
 
     /**
      * 공통 생성자
@@ -76,6 +82,9 @@ public abstract class AbstractYModemServer implements YModemServerInterface {
     protected abstract OutputStream getOutputStream(Object clientConnection) throws IOException;
     protected abstract void closeClientConnection(Object clientConnection);
     protected abstract String getClientInfo(Object clientConnection);
+    protected abstract boolean isConnected(Object clientConnection);
+
+    private volatile Object latestClient = null;
 
     @Override
     public void startServer(int port) {
@@ -111,7 +120,10 @@ public abstract class AbstractYModemServer implements YModemServerInterface {
                                 logMessage("[O] " + getServerType() + " Client connected: " + getClientInfo(clientConnection));
 
                                 // 🎯 핵심: 공통 YModem 파일 처리 로직
-                                handleIncomingFile(clientConnection);
+                                handleYModemTransmission(clientConnection);
+
+                                latestClient = clientConnection;
+
 
                             } catch (IOException e) {
                                 logMessage(getServerType() + " Server communication error: " + e.getMessage());
@@ -130,6 +142,24 @@ public abstract class AbstractYModemServer implements YModemServerInterface {
             }
         });
         serverThread.start();
+
+        triggerThread = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                while (isRunning) {
+                    try (Socket triggerSocket = (Socket) acceptClientConnection()) {
+                        OutputStream out = triggerSocket.getOutputStream();
+                        sendTriggerData(context, out, 77.7f, 123);
+                        logMessage("TriggerThread: 트리거 데이터 전송 완료");
+                    } catch (IOException e) {
+                        logMessage("[X] TriggerThread: 연결 실패 또는 전송 오류: " + e.getMessage());
+                    }
+
+                    waitSeconds(10000);
+                }
+            }
+        });
+        triggerThread.start();
     }
 
     @Override
@@ -137,6 +167,7 @@ public abstract class AbstractYModemServer implements YModemServerInterface {
         isRunning = false;
         try {
             serverThread.stop();
+            triggerThread.stop();
         } catch (RuntimeException e) {
             logMessage("[X] " + getServerType() + " Server thread already stopped: " + e.getMessage());
         }
@@ -149,7 +180,7 @@ public abstract class AbstractYModemServer implements YModemServerInterface {
      * TCP든 Bluetooth든 동일한 로직으로 처리
      * @param clientConnection 클라이언트 연결 객체 (Socket 또는 BluetoothSocket)
      */
-    protected void handleIncomingFile(Object clientConnection) {
+    protected void handleYModemTransmission(Object clientConnection) {
         InputStream inputStream = null;
         OutputStream outputStream = null;
 
@@ -157,7 +188,7 @@ public abstract class AbstractYModemServer implements YModemServerInterface {
         if (!saveDirectory.exists()) saveDirectory.mkdirs();
 
         try {
-            // 하위 클래스에서 스트림 획득
+            // 하위 클래스에서 스트림 획득 (블루투스 or TCP 서버 소켓의 in-output Stream 획득 가능
             inputStream = getInputStream(clientConnection);
             outputStream = getOutputStream(clientConnection);
 
@@ -278,6 +309,38 @@ public abstract class AbstractYModemServer implements YModemServerInterface {
             logMessage("8-100. [RX] 센서 데이터 전송 실패 (IOException), " + e.getCause() + ", " + e.getMessage());
             return false;
         }
+    }
+
+    // 🔥 이하 모든 메서드들은 완전히 공통화된 YModem 프로토콜 처리 로직
+    protected boolean sendTriggerData(Context context, OutputStream outputStream,
+                                      float waterLevel, int rtuId) throws IOException {
+        try {
+            String triggerJson = createTriggerJson(waterLevel, rtuId);
+            byte[] dataBytes = triggerJson.getBytes("UTF-8");
+
+            outputStream.write(dataBytes);
+            outputStream.flush();
+
+            logMessage("✔ 트리거 데이터 전송 성공: " + triggerJson);
+            return true;
+
+        } catch (IOException e) {
+            logMessage("❌ 트리거 데이터 전송 실패: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private String createTriggerJson(float waterLevel, int rtuId) {
+        String timestamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.KOREA)
+            .format(new Date());
+
+        return "{\n" +
+                "  \"timestamp\": \"" + timestamp + "\",\n" +
+                "  \"data\": {\n" +
+                "    \"waterLevel\": " + waterLevel + ",\n" +
+                "    \"rtuId\": " + rtuId + "\n" +
+                "  }\n" +
+                "}";
     }
 
     protected void waitSeconds(int waitTime) {

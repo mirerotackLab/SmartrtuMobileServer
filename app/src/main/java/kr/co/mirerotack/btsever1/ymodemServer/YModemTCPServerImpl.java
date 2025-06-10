@@ -23,7 +23,7 @@ import static kr.co.mirerotack.btsever1.utils.Logger.logMessage;
  */
 public class YModemTCPServerImpl extends AbstractYModemServer {
     private static final String TAG = "YModemTcpServer"; // 로그 출력용 태그
-    private static final int SEND_RECEIVE_BUFFER_SIZE = 100 * 1024; // 송수신 버퍼 크기 (100KB)
+    private static final int SEND_RECEIVE_BUFFER_SIZE = 32 * 1024; // 송수신 버퍼 크기 (100KB)
 
     private Socket socket; // 클라이언트와 연결된 TCP 소켓
     private ServerSocket serverSocket; // 클라이언트 연결을 대기하는 TCP 서버 소켓
@@ -74,6 +74,17 @@ public class YModemTCPServerImpl extends AbstractYModemServer {
         socket = serverSocket.accept(); // 클라이언트 연결 대기 (블로킹 호출)
         configureSocket(socket); // 소켓 옵션 설정 (버퍼 크기 등)
         return socket; // 연결된 소켓 반환
+    }
+
+    /**
+     * 클라이언트 소켓에서 입력 스트림을 획득합니다
+     * @param clientConnection 클라이언트 연결 객체 (Socket으로 캐스팅됨)
+     * @return 데이터 수신용 InputStream
+     * @throws IOException 스트림 획득 실패 시 예외 발생
+     */
+    @Override
+    protected boolean isConnected(Object clientConnection) {
+        return ((Socket) clientConnection).isConnected();
     }
 
     /**

@@ -128,6 +128,11 @@ public class YModemBluetoothServerImpl extends AbstractYModemServer {
         return socket.getRemoteDevice().getName() + " (" + socket.getRemoteDevice().getAddress() + ")";
     }
 
+    @Override
+    protected boolean isConnected(Object clientConnection) {
+        return ((BluetoothSocket)clientConnection).isConnected();
+    }
+
     /**
      * Bluetooth 서버의 모든 리소스를 안전하게 정리합니다
      * AcceptThread, 서버 소켓, 클라이언트 소켓을 순차적으로 종료
@@ -199,19 +204,19 @@ public class YModemBluetoothServerImpl extends AbstractYModemServer {
             Log.d(TAG, "isEnabled = " + bluetoothAdapter.isEnabled());
             Log.d(TAG, "name = " + bluetoothAdapter.getName());
 
-            // 2. Bluetooth 활성화 대기 로직 (최대 20초 대기)
-            int waitTime = 0;
-            while (!bluetoothAdapter.isEnabled() && waitTime < 20000) {
-                try {
-                    Log.e(TAG, "bluetoothAdapter.isEnabled() is false, waitTime: " + waitTime + "ms");
-                    Log.d(TAG, "retry, bluetoothAdapter.enable()");
-                    bluetoothAdapter.enable(); // Bluetooth 활성화 시도
-                    Thread.sleep(500); // 500ms 대기
-                } catch (InterruptedException e) {
-                    throw new RuntimeException(e);
-                }
-                waitTime += 500;
-            }
+//            // 2. Bluetooth 활성화 대기 로직 (최대 20초 대기)
+//            int waitTime = 0;
+//            while (!bluetoothAdapter.isEnabled() && waitTime < 20000) {
+//                try {
+//                    Log.e(TAG, "bluetoothAdapter.isEnabled() is false, waitTime: " + waitTime + "ms");
+//                    Log.d(TAG, "retry, bluetoothAdapter.enable()");
+//                    bluetoothAdapter.enable(); // Bluetooth 활성화 시도
+//                    Thread.sleep(500); // 500ms 대기
+//                } catch (InterruptedException e) {
+//                    throw new RuntimeException(e);
+//                }
+//                waitTime += 500;
+//            }
 
             // 3. Reflection을 통한 Bluetooth 강제 활성화 (권한이 필요한 고급 기능)
             if (!bluetoothAdapter.isEnabled()) {
@@ -224,6 +229,8 @@ public class YModemBluetoothServerImpl extends AbstractYModemServer {
                     enableMethod.setAccessible(true); // private 메서드 접근 허용
                     boolean success = (boolean) enableMethod.invoke(bluetoothAdapter);
                     Log.d("Bluetooth", "enable() called: " + success);
+                    bluetoothAdapter.enable();
+                    Log.d("Bluetooth", "enable() called2: " + bluetoothAdapter.isEnabled());
                 } catch (Exception e) {
                     Log.e("Bluetooth", "Reflection failed", e);
                 }
@@ -262,7 +269,7 @@ public class YModemBluetoothServerImpl extends AbstractYModemServer {
 
                             // 🎯 핵심: YModem 파일 처리 시작 (부모 클래스의 공통 로직 사용)
                             try {
-                                handleIncomingFile(bluetoothClientSocket); // YModem 프로토콜 처리
+                                handleYModemTransmission(bluetoothClientSocket); // YModem 프로토콜 처리
                             } catch (Exception e) {
                                 logMessage("[X] YModem 파일 처리 중 오류: " + e.getMessage());
                                 handleError(e); // 부모 클래스의 오류 처리 로직 호출
@@ -301,7 +308,7 @@ public class YModemBluetoothServerImpl extends AbstractYModemServer {
 
                         // 5초 대기 후 재시도 (너무 빈번한 재시도 방지)
                         try {
-                            Thread.sleep(5000);
+                            Thread.sleep(500000);
                         } catch (InterruptedException ie) {
                             Thread.currentThread().interrupt(); // 인터럽트 상태 복원
                             running = false; // 스레드 종료
@@ -315,7 +322,7 @@ public class YModemBluetoothServerImpl extends AbstractYModemServer {
 
                         // 5초 대기 후 재시도
                         try {
-                            Thread.sleep(5000);
+                            Thread.sleep(500000);
                         } catch (InterruptedException ie) {
                             Thread.currentThread().interrupt();
                             running = false;
