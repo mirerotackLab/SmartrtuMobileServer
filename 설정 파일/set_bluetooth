@@ -1,12 +1,8 @@
 #!/system/bin/sh
 
-PASSWORD=0730
-LOG_FILE_PATH="/data/local/tmp/set_bluetooth.log" # 로그 기록
-
-# 부팅될 때 까지 대기
-while [ "$(getprop sys.boot_completed)" != "1" ]; do
-    sleep 1
-done
+LOG_FILE_PATH="/data/local/tmp/set_bluetooth.log"
+AGENT_LOG_GILE_PATH="/data/local/tmp/agent.log"
+PASSWORD=0731
 
 function addLog() { # 로그 기록
     local MESSAGE="$1"
@@ -14,49 +10,47 @@ function addLog() { # 로그 기록
     echo "[$CURRENT_TIME] $MESSAGE" >> "$LOG_FILE_PATH"
 }
 
-: > "$LOG_FILE_PATH" # 로그파일 초기화
+# : > "$LOG_FILE_PATH" # 로그파일 초기화
+
+# 부팅 완료 되었는지 확인
+if [ "$(getprop sys.boot_completed)" != "1" ]; then
+    addLog "[SKIP] 아직 부팅 완료 아님 -> 종료"
+    exit 0
+fi
 
 # 블루투스 USB 동글이 꼽힐때 까지(hci0가 생성될 때까지) 대기
-addLog "Waiting for hci0 interface..."
+if ! hciconfig | grep -q hci0; then
+    addLog "[SKIP] hci0 없음. USB 블루투스 동글 미삽입 상태 -> 종료"
+    exit 0
+fi
 
-while true; do
-    if hciconfig | grep -q hci0; then
-        addLog "hci0 detected!"
+# hci0가 이미 활성 상태인지 체크
+if hciconfig hci0 | grep -q "UP RUNNING"; then
+    addLog "[SKIP] hci0 이미 활성 상태. 별도 작업 안 함 -> 종료"
+    exit 0
+fi
 
-        # 전에 돌고 있던 agent 제거
-        addLog "Killing all 'agent' processes..."
+addLog "[ACTION] hci0 탐지됨. 블루투스 초기화 시작"
 
-        # 'agent'라는 이름을 가진 프로세스의 PID 목록을 찾아 종료
-        ps | grep '[a]gent' | while read line; do
-            set -- $line
-            pid=$2
-            addLog "Killing agent with PID: $pid"
-            kill -9 $pid
-        done
-
-        break
-    fi
-    sleep 1
+# 이전 agent 프로세스 종료
+ps | grep '[a]gent' | while read line; do
+    pid=$(echo $line | awk '{print $2}')
+    addLog "[KILL] 기존 agent 종료: PID $pid"
+    kill -9 "$pid"
 done
 
-addLog "Start hci0 hciconfig setting..."
-
-hciconfig hci0 down    # hci0 비활성화
+hciconfig hci0 down
 sleep 2
-
-hciconfig hci0 up      # hci0 활성화
+hciconfig hci0 up
 sleep 2
+hciconfig hci0 piscan
 
-hciconfig hci0 piscan  # 다른 기기가 이 기기를 찾을 수 있고, 연결할 수 있게 설정
-sleep 2
+addLog "[ACTION] 블루투스 초기화 끝"
 
-hciconfig hci0 name SmartRTU
-hciconfig hci0 class 0x000100
-
-addLog "End hci0 hciconfig setting..."
-hciconfig -a >> "$LOG_FILE_PATH"
-
-
-# 새로운 agent 실행
-addLog "Run agent --adapter hci0 $PASSWORD"
-/system/xbin/agent --adapter hci0 $PASSWORD
+## agent 실행
+#if [ -x /system/xbin/agent ]; then
+#    /system/xbin/agent --adapter hci0 "$PASSWORD" >> "$AGENT_LOG_GILE_PATH" 2>&1 &
+#    addLog "[START] agent 실행 완료"
+#else
+#    addLog "[ERROR] agent 실행 파일 없음"
+#fi

@@ -91,7 +91,7 @@ public class YModem {
 
         try {
             // 📥 **YModem 헤더 블록 수신 (파일명 및 크기)**
-            int character = modem.requestTransmissionStart();
+            int character = modem.sendStartSignal();
 
             block = modem.readBlock(0, (character == Modem.SOH), new YModemCRC16(), 0, 128);
             String headerString = new String(block, Charset.forName("US-ASCII")).trim();
