@@ -146,16 +146,39 @@ public abstract class AbstractYModemServer implements YModemServerInterface {
         triggerThread = new Thread(new Runnable() {
             @Override
             public void run() {
+                Socket triggerSocket = null;
+                OutputStream out = null;
+
+                try {
+                    triggerSocket = (Socket) acceptClientConnection();
+                } catch (IOException e) {
+                    logMessage("[X] TriggerThread: 연결 실패 또는 전송 오류: " + e.getCause() + ": " + e.getMessage());
+                    waitSeconds(5000);
+                }
+
                 while (isRunning) {
-                    try (Socket triggerSocket = (Socket) acceptClientConnection()) {
-                        OutputStream out = triggerSocket.getOutputStream();
-                        sendTriggerData(context, out, 77.7f, 123);
-                        logMessage("TriggerThread: 트리거 데이터 전송 완료");
-                    } catch (IOException e) {
-                        logMessage("[X] TriggerThread: 연결 실패 또는 전송 오류: " + e.getMessage());
+                    if (triggerSocket == null || !triggerSocket.isConnected()) {
+                        logMessage("triggerSocket: close or disconnected");
                     }
 
-                    waitSeconds(10000);
+                    try {
+                        out = triggerSocket.getOutputStream();
+                        boolean isSuccess = sendTriggerData(context, out, 77.7f, 123);
+
+                        // 클라이언트가 연결을 종료해서 실패한 경우, 새로운 소켓 연결을 대기함
+                        if (!isSuccess) {
+                            try {
+                                triggerSocket = (Socket) acceptClientConnection();
+                            } catch (IOException e) {
+                                logMessage("[X] TriggerThread: 연결 실패 또는 전송 오류: " + e.getCause() + ": " + e.getMessage());
+                                waitSeconds(5000);
+                            }
+                            continue;
+                        }
+                        waitSeconds(1000);
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
                 }
             }
         });
@@ -321,11 +344,17 @@ public abstract class AbstractYModemServer implements YModemServerInterface {
             outputStream.write(dataBytes);
             outputStream.flush();
 
-            logMessage("✔ 트리거 데이터 전송 성공: " + triggerJson);
+            logMessage("✔ 트리거 데이터 전송 성공: " + triggerJson
+                .replace("\n", " ")
+                .replace("\t", " ")
+                .replace("     ", " ")
+                .replace("   ", " ")
+
+            );
             return true;
 
         } catch (IOException e) {
-            logMessage("❌ 트리거 데이터 전송 실패: " + e.getMessage());
+            logMessage("❌ 트리거 데이터 전송 실패: " + e.getCause() + ": " + e.getMessage());
             return false;
         }
     }

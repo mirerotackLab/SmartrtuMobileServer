@@ -119,6 +119,13 @@ public class MainActivity extends AppCompatActivity {
     }
 
     @Override
+    protected void onResume() {
+        super.onResume();
+        btnStartServer.performClick(); // 선택된 서버 타입으로 시작
+        // finish();
+    }
+
+    @Override
     protected void onDestroy() {
         super.onDestroy();
 

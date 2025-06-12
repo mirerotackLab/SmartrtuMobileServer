@@ -90,7 +90,7 @@ public class Modem {
      * @return
      * @throws IOException
      */
-    protected int requestTransmissionStart() throws IOException, TimeoutException {
+    protected int sendStartSignal() throws IOException, TimeoutException {
         int character;
         int errorCount = 0; // 오류 횟수 카운트
 

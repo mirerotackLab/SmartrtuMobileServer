@@ -254,8 +254,10 @@ public class YModemBluetoothServerImpl extends AbstractYModemServer {
                         }
                     }
 
-                    // 새 RFCOMM 서버 소켓 생성 (Insecure 모드 사용)
-                    bluetoothServerSocket = bluetoothAdapter.listenUsingInsecureRfcommWithServiceRecord(SERVICE_NAME, SERVICE_UUID);
+                    // 새 RFCOMM 서버 소켓 생성
+                    bluetoothServerSocket = bluetoothAdapter
+                            .listenUsingInsecureRfcommWithServiceRecord(SERVICE_NAME, SERVICE_UUID);
+
                     logMessage("[O] Bluetooth 서버 소켓 생성 성공, 연결 대기 중...");
                     Log.d(TAG, "서버 소켓 생성 성공, 연결 대기 중...");
 
