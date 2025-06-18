@@ -1,7 +1,5 @@
 package kr.co.mirerotack.btsever1.ymodemServer;
 
-import android.bluetooth.BluetoothAdapter;
-import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothServerSocket;
 import android.bluetooth.BluetoothSocket;
 import android.content.Context;
@@ -11,8 +9,6 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.lang.reflect.Method;
-import java.util.Set;
 import java.util.UUID;
 
 import static kr.co.mirerotack.btsever1.utils.Logger.logMessage;
@@ -22,7 +18,7 @@ import static kr.co.mirerotack.btsever1.utils.Logger.logMessage;
  * TCP와 달리 Bluetooth는 별도 스레드(AcceptThread)를 통해 연결을 관리하며,
  * 페어링된 장치와의 RFCOMM 통신을 담당합니다
  */
-public class YModemBluetoothServerImpl extends AbstractYModemServer {
+public class YModemBluetoothAbstractServerImpl extends YModemAbstractServer {
     private static final String TAG = "YModemBluetoothServer"; // 로그 출력용 태그
     private static final String SERVICE_NAME = "YModemBluetoothServer"; // Bluetooth 서비스 이름 (클라이언트에서 검색 가능)
     private static final UUID SERVICE_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB"); // SPP(Serial Port Profile) 표준 UUID
@@ -36,7 +32,7 @@ public class YModemBluetoothServerImpl extends AbstractYModemServer {
      * @param apkDownloadPath APK 파일을 저장할 디렉토리 경로
      * @param context Android 애플리케이션 컨텍스트 (Bluetooth 권한 및 시스템 접근용)
      */
-    public YModemBluetoothServerImpl(File apkDownloadPath, Context context) {
+    public YModemBluetoothAbstractServerImpl(File apkDownloadPath, Context context) {
         super(apkDownloadPath, context); // 부모 클래스의 공통 초기화 실행
     }
 
@@ -192,145 +188,10 @@ public class YModemBluetoothServerImpl extends AbstractYModemServer {
 
         @Override
         public void run() {
-            BluetoothAdapter bluetoothAdapter = BluetoothAdapter.getDefaultAdapter(); // 시스템 Bluetooth 어댑터 획득
-
-            // 1. Bluetooth 어댑터 존재 여부 확인
-            if (bluetoothAdapter == null) {
-                logMessage("[X] Bluetooth 어댑터 없음");
-                Log.e(TAG, "Bluetooth 어댑터를 찾을 수 없음");
-                return; // Bluetooth 미지원 디바이스
-            }
-
-            Log.d(TAG, "isEnabled = " + bluetoothAdapter.isEnabled());
-            Log.d(TAG, "name = " + bluetoothAdapter.getName());
-
-//            // 2. Bluetooth 활성화 대기 로직 (최대 20초 대기)
-//            int waitTime = 0;
-//            while (!bluetoothAdapter.isEnabled() && waitTime < 20000) {
-//                try {
-//                    Log.e(TAG, "bluetoothAdapter.isEnabled() is false, waitTime: " + waitTime + "ms");
-//                    Log.d(TAG, "retry, bluetoothAdapter.enable()");
-//                    bluetoothAdapter.enable(); // Bluetooth 활성화 시도
-//                    Thread.sleep(500); // 500ms 대기
-//                } catch (InterruptedException e) {
-//                    throw new RuntimeException(e);
-//                }
-//                waitTime += 500;
-//            }
-
-            // 3. Reflection을 통한 Bluetooth 강제 활성화 (권한이 필요한 고급 기능)
-            if (!bluetoothAdapter.isEnabled()) {
-                logMessage("[X] Bluetooth 꺼져 있음");
-                Log.e(TAG, "Bluetooth가 꺼져 있음");
-
-                try {
-                    // Java Reflection을 사용하여 시스템 권한으로 Bluetooth 강제 활성화
-                    Method enableMethod = BluetoothAdapter.class.getMethod("enable");
-                    enableMethod.setAccessible(true); // private 메서드 접근 허용
-                    boolean success = (boolean) enableMethod.invoke(bluetoothAdapter);
-                    Log.d("Bluetooth", "enable() called: " + success);
-                    bluetoothAdapter.enable();
-                    Log.d("Bluetooth", "enable() called2: " + bluetoothAdapter.isEnabled());
-                } catch (Exception e) {
-                    Log.e("Bluetooth", "Reflection failed", e);
-                }
-            }
-
-            // 4. 페어링된 장치 목록 로깅 (디버깅 및 연결 가능 장치 확인용)
-            Set<BluetoothDevice> bondedDevices = bluetoothAdapter.getBondedDevices();
-            for (BluetoothDevice device : bondedDevices) {
-                Log.d(TAG, "Paired device: " + device.getName() + ", " + device.getAddress());
-            }
-
             // 5. 클라이언트 연결 수락 무한 루프 (서버의 핵심 로직)
             while (running && isRunning) {
-                try {
-                    // 이전 서버 소켓이 있으면 정리 (재연결 준비)
-                    if (bluetoothServerSocket != null) {
-                        try {
-                            bluetoothServerSocket.close();
-                        } catch (IOException e) {
-                            Log.e(TAG, "이전 서버 소켓 닫기 실패", e);
-                        }
-                    }
+                // JNI Code로 변경해야함
 
-                    // 새 RFCOMM 서버 소켓 생성
-                    bluetoothServerSocket = bluetoothAdapter
-                            .listenUsingInsecureRfcommWithServiceRecord(SERVICE_NAME, SERVICE_UUID);
-
-                    logMessage("[O] Bluetooth 서버 소켓 생성 성공, 연결 대기 중...");
-                    Log.d(TAG, "서버 소켓 생성 성공, 연결 대기 중...");
-
-                    // 클라이언트 연결 수락 (블로킹 호출 - 연결될 때까지 대기)
-                    bluetoothClientSocket = bluetoothServerSocket.accept();
-
-                    if (bluetoothClientSocket != null) {
-                        synchronized (YModemBluetoothServerImpl.this) {
-                            logMessage("[O] Bluetooth 클라이언트 연결 성공: " + bluetoothClientSocket.getRemoteDevice().getName());
-                            Log.d(TAG, "클라이언트 연결 성공: " + bluetoothClientSocket.getRemoteDevice().getName());
-
-                            // 🎯 핵심: YModem 파일 처리 시작 (부모 클래스의 공통 로직 사용)
-                            try {
-                                handleYModemTransmission(bluetoothClientSocket); // YModem 프로토콜 처리
-                            } catch (Exception e) {
-                                logMessage("[X] YModem 파일 처리 중 오류: " + e.getMessage());
-                                handleError(e); // 부모 클래스의 오류 처리 로직 호출
-                            } finally {
-                                // 연결 처리 완료 후 클라이언트 소켓 정리
-                                try {
-                                    if (bluetoothClientSocket != null) {
-                                        bluetoothClientSocket.close();
-                                        bluetoothClientSocket = null; // 다음 연결을 위해 null로 초기화
-                                    }
-                                } catch (IOException e) {
-                                    Log.e(TAG, "클라이언트 소켓 닫기 실패", e);
-                                }
-                            }
-
-                            // 서버 소켓 닫기 (한 번에 하나의 연결만 처리하는 정책)
-                            try {
-                                if (bluetoothServerSocket != null) {
-                                    bluetoothServerSocket.close();
-                                }
-                            } catch (IOException e) {
-                                Log.e(TAG, "서버 소켓 닫기 실패", e);
-                            }
-                        }
-                    }
-                } catch (IOException e) {
-                    // 연결 실패 시 재시도 로직
-                    if (running && isRunning) {
-                        if (bluetoothAdapter.isEnabled()) {
-                            logMessage("[X] Bluetooth 클라이언트 연결 중 오류 발생, 재시도 중...");
-                            Log.e(TAG, "accept() 에러, 재시도 중...", e);
-                        } else {
-                            logMessage("[X] bluetoothAdapter.isEnabled() is False...");
-                            Log.e(TAG, "bluetoothAdapter.isEnabled() is False... 재시도 중...", e);
-                        }
-
-                        // 5초 대기 후 재시도 (너무 빈번한 재시도 방지)
-                        try {
-                            Thread.sleep(500000);
-                        } catch (InterruptedException ie) {
-                            Thread.currentThread().interrupt(); // 인터럽트 상태 복원
-                            running = false; // 스레드 종료
-                        }
-                    }
-                } catch (Exception e) {
-                    // 예상치 못한 예외 발생 시 처리
-                    if (running && isRunning) {
-                        logMessage("[X] Bluetooth 클라이언트 연결 중 예외 발생, 재시도 중...");
-                        Log.e(TAG, "accept() 예외, 재시도 중...", e);
-
-                        // 5초 대기 후 재시도
-                        try {
-                            Thread.sleep(500000);
-                        } catch (InterruptedException ie) {
-                            Thread.currentThread().interrupt();
-                            running = false;
-                        }
-                    }
-                }
             }
         }
 

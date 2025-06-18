@@ -1,17 +1,12 @@
 package kr.co.mirerotack.btsever1;
 
-import android.Manifest;
 import android.bluetooth.BluetoothAdapter;
 import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
-import android.content.pm.PackageManager;
-import android.os.Build;
 import android.os.Bundle;
-import android.support.v4.app.ActivityCompat;
-import android.support.v4.content.ContextCompat;
 import android.support.v7.app.AppCompatActivity;
 import android.util.Log;
 import android.view.View;
@@ -42,11 +37,13 @@ public class MainActivity extends AppCompatActivity {
         System.loadLibrary("MyJniLib");  // libMyJniLib.so 와 일치해야 함
     }
 
+    NativeBtServer nativeBtServer = new NativeBtServer();
+
     /**
      * JNI를 통한 네이티브 Bluetooth 서버 클래스 (기존 기능 유지)
      */
     public class NativeBtServer {
-        public native int startBluetoothServer();  // JNI 연결되는 함수
+        public native int createBluetoothServer();  // JNI 연결되는 함수
     }
 
     /**
@@ -160,11 +157,9 @@ public class MainActivity extends AppCompatActivity {
      * JNI 네이티브 Bluetooth 서버를 시작합니다 (기존 기능 유지)
      */
     private void startNativeBluetoothServer() {
-        NativeBtServer server = new NativeBtServer();
-
         new Thread(() -> {
-            server.startBluetoothServer();  // JNI 호출
-            Log.d("NativeBT", "네이티브 서버 시작 완료");
+            nativeBtServer.createBluetoothServer();  // JNI 호출
+            Log.w("NativeBT", "네이티브 서버 시작 완료");
         }).start();
     }
 
@@ -277,18 +272,6 @@ public class MainActivity extends AppCompatActivity {
      * Bluetooth YModem 서버를 시작합니다
      */
     private void startBluetoothServer() {
-        // Bluetooth 권한 체크 후 권한이 없으면 요청
-        if (!checkBluetoothPermissions()) {
-            txtStatus.setText("Bluetooth 권한을 요청하는 중...");
-            return; // 권한 요청은 onRequestPermissionsResult에서 처리
-        }
-
-        // Bluetooth 어댑터 상태 확인
-        if (!checkBluetoothAdapter()) {
-            resetButtonState();
-            return;
-        }
-
         txtStatus.setText("Bluetooth YModem 서버를 시작하는 중...");
 
         try {
@@ -357,72 +340,7 @@ public class MainActivity extends AppCompatActivity {
             return false;
         }
 
-        if (!bluetoothAdapter.isEnabled()) {
-            Log.e(TAG, "Bluetooth가 꺼져 있습니다. 설정에서 활성화해주세요.");
-            // txtStatus.setText("Bluetooth가 꺼져 있습니다. 설정에서 활성화해주세요.");
-            return true; // 임시로 true 반환
-        }
-
         return true;
-    }
-
-    /**
-     * Bluetooth 관련 권한들을 체크하고 필요시 요청합니다
-     * @return 모든 권한이 허용되어 있으면 true, 아니면 false
-     */
-    private boolean checkBluetoothPermissions() {
-        boolean allPermissionsGranted = true;
-
-        if (Build.VERSION.SDK_INT < 31) { // Android 11 이하
-            Log.d("MainActivity", "Android 11 이하 - 기존 Bluetooth 권한 체크");
-
-            // Android 11 이하에서 필요한 Bluetooth 권한들
-            String[] permissions = {
-                    Manifest.permission.BLUETOOTH,
-                    Manifest.permission.BLUETOOTH_ADMIN,
-                    Manifest.permission.ACCESS_FINE_LOCATION
-            };
-
-            for (String permission : permissions) {
-                if (ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED) {
-                    allPermissionsGranted = false;
-                    break;
-                }
-            }
-
-            if (!allPermissionsGranted) {
-                ActivityCompat.requestPermissions(this, permissions, REQUEST_BT_PERMISSIONS);
-            }
-        }
-
-        return allPermissionsGranted;
-    }
-
-    /**
-     * 권한 요청 결과를 처리합니다
-     */
-    @Override
-    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
-        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-
-        if (requestCode == REQUEST_BT_PERMISSIONS) {
-            // 모든 권한이 승인되었는지 확인
-            boolean allGranted = true;
-            for (int result : grantResults) {
-                if (result != PackageManager.PERMISSION_GRANTED) {
-                    allGranted = false;
-                    break;
-                }
-            }
-
-            if (allGranted) {
-                txtStatus.setText("Bluetooth 권한이 허용되었습니다. 다시 시작 버튼을 눌러주세요.");
-                resetButtonState(); // 버튼 상태 원복하여 다시 시도 가능하게 함
-            } else {
-                txtStatus.setText("Bluetooth 권한이 필요합니다. 설정에서 허용해주세요.");
-                resetButtonState();
-            }
-        }
     }
 
     /**
