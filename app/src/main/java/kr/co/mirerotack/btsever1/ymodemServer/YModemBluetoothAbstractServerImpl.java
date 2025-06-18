@@ -191,7 +191,12 @@ public class YModemBluetoothAbstractServerImpl extends YModemAbstractServer {
             // 5. 클라이언트 연결 수락 무한 루프 (서버의 핵심 로직)
             while (running && isRunning) {
                 // JNI Code로 변경해야함
-
+                try {
+                    handleYModemTransmission(bluetoothClientSocket); // YModem 프로토콜 처리
+                } catch (Exception e) {
+                    logMessage("[X] YModem 파일 처리 중 오류: " + e.getMessage());
+                    handleError(e); // 부모 클래스의 오류 처리 로직 호출
+                }
             }
         }
 

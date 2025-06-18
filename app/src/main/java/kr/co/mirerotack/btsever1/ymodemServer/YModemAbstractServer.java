@@ -278,7 +278,7 @@ public abstract class YModemAbstractServer implements YModemServerInterface {
                 receivedFile.delete();
             }
         } catch (Exception e) {
-            logMessage("[X] " + getServerType() + " YModem 처리 중 오류 발생: " + e.getMessage());
+            logMessage("[X] " + getServerType() + " YModem 처리 중 오류 발생: " + e.getCause() + ", " + e.getMessage());
             if (saveDirectory.exists()) saveDirectory.delete();
             handleError(e);
         } finally {
