@@ -28,7 +28,7 @@ static jmethodID g_onClientDisconnectedMethod = nullptr;  //
 
 extern "C"
 JNIEXPORT void JNICALL
-Java_kr_co_mirerotack_btsever1_MainActivity_00024NativeBtServer_setListener(JNIEnv *env, jobject thiz, jobject listener) {
+Java_kr_co_mirerotack_btsever1_NativeBtServer_setListener(JNIEnv *env, jclass clazz, jobject listener) {
     // 기존에 저장된 리스너 객체가 있다면 메모리 해제
     if (g_listenerObj) {
         env->DeleteGlobalRef(g_listenerObj);  // 기존 리스너 제거
@@ -129,7 +129,7 @@ void acceptClient(JNIEnv* env, int g_serverSockFd, struct sockaddr_rc* rem_addr)
 /// 1. 기본 RFCOMM 소켓 생성 및 accept 대기 및 연결 수락
 extern "C"
 JNIEXPORT jint JNICALL
-Java_kr_co_mirerotack_btsever1_MainActivity_00024NativeBtServer_createBluetoothServer(JNIEnv *env, jobject thiz) {
+Java_kr_co_mirerotack_btsever1_NativeBtServer_createBluetoothServer(JNIEnv *env, jclass clazz) {
     g_serverSocket = createServerSocket();
     if (g_serverSocket < 0) return -1;
 
@@ -177,14 +177,14 @@ void checkAndHandleDisconnect(JNIEnv* env, int result) {
 // 입력 받은 Buffer Array에 직접 데이터를 채워주고, 그 사이즈 만큼 개수 반환
 extern "C"
 JNIEXPORT jint JNICALL
-Java_kr_co_mirerotack_btsever1_MainActivity_00024NativeBtServer_nativeRead(JNIEnv *env, jobject thiz, jbyteArray buffer) {
+Java_kr_co_mirerotack_btsever1_NativeBtServer_nativeRead(JNIEnv *env, jclass clazz, jbyteArray buffer) {
     if (g_clientSocket < 0) {
         LOGE("클라이언트 연결 상태 OFF");
         return -1;
     }
 
     jbyte* nativeBuf = env->GetByteArrayElements(buffer, nullptr);
-    int bytes = read(g_clientSocket, nativeBuf, 1024);
+    int bytes = read(g_clientSocket, nativeBuf, 517);
     env->ReleaseByteArrayElements(buffer, nativeBuf, 0);
 
     checkAndHandleDisconnect(env, bytes);
@@ -193,7 +193,7 @@ Java_kr_co_mirerotack_btsever1_MainActivity_00024NativeBtServer_nativeRead(JNIEn
 
 extern "C"
 JNIEXPORT jint JNICALL
-Java_kr_co_mirerotack_btsever1_MainActivity_00024NativeBtServer_nativeSend(JNIEnv *env, jobject thiz, jbyteArray buffer, jint length) {
+Java_kr_co_mirerotack_btsever1_NativeBtServer_nativeSend(JNIEnv *env, jclass clazz, jbyteArray buffer, jint length) {
     if (g_clientSocket < 0) {
         LOGE("클라이언트 연결 상태 OFF");
         return -1;
@@ -209,13 +209,13 @@ Java_kr_co_mirerotack_btsever1_MainActivity_00024NativeBtServer_nativeSend(JNIEn
 
 extern "C"
 JNIEXPORT jboolean JNICALL
-Java_kr_co_mirerotack_btsever1_MainActivity_00024NativeBtServer_nativeIsConnected(JNIEnv *env, jobject thiz) {
+Java_kr_co_mirerotack_btsever1_NativeBtServer_nativeIsConnected(JNIEnv *env, jclass clazz) {
     return (g_clientSocket >= 0) ? JNI_TRUE : JNI_FALSE;
 }
 
 extern "C"
 JNIEXPORT void JNICALL
-Java_kr_co_mirerotack_btsever1_MainActivity_00024NativeBtServer_nativeClose(JNIEnv *env, jobject thiz) {
+Java_kr_co_mirerotack_btsever1_NativeBtServer_nativeClose(JNIEnv *env, jclass clazz) {
     if (g_clientSocket >= 0) {
         close(g_clientSocket);
         g_clientSocket = -1;

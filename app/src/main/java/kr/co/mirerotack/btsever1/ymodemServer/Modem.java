@@ -58,7 +58,7 @@ public class Modem {
         this.inputStream = inputStream;
         this.outputStream = outputStream;
         shortBlockBuffer = new byte[128];
-        longBlockBuffer = new byte[1024];
+        longBlockBuffer = new byte[512];
     }
 
     private int blockNumber = 0; // 📌 블록 번호 변수 추가

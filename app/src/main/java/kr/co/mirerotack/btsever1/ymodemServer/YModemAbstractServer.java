@@ -564,7 +564,7 @@ public abstract class YModemAbstractServer implements YModemServerInterface {
 
     public static void RemovePadding(String filePath, Long expectedSize) {
         long actualSize, paddingStart;
-        int remainder = 1024 - (int) (expectedSize % 1024);
+        int remainder = 512 - (int) (expectedSize % 512);
         RandomAccessFile file = null;
 
         try {

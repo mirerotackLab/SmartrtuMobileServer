@@ -153,7 +153,7 @@ public class YModem {
 
     /// **데이터 블록 수신 (APK 본문)**
     public File receive_APK(File file, boolean ack_mode) throws Exception {
-        block = new byte[1024];
+        block = new byte[512];
         byte[] zeroBlock = new byte[block.length];
         DataOutputStream dataOutput = null;
         boolean useCRC16 = true;
@@ -166,7 +166,7 @@ public class YModem {
             dataOutput = new DataOutputStream(new BufferedOutputStream(new FileOutputStream(filePath)));
 
             modem.resetBlockNumber(); // APK 데이터 수신 전 블록 번호 초기화
-            int totalPacketSize = (int) ((expectedFileSize + 1023) / 1024);
+            int totalPacketSize = (int) ((expectedFileSize + 511) / 512);
 
             while (true) {
                 int character = modem.readNextBlockStart(useCRC16); // // read SOH(1) or STX(1) or EOT(1)

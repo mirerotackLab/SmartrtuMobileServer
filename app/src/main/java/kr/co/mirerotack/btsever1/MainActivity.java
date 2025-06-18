@@ -37,12 +37,6 @@ public class MainActivity extends AppCompatActivity implements NativeBTStatusLis
     private static final String TAG = "MainActivity";
     private static final String JNI_TAG = "JNI->Java Callback";
 
-    static {
-        System.loadLibrary("MyJniLib");  // libMyJniLib.so 와 일치해야 함
-    }
-
-    NativeBtServer nativeBtServer = new NativeBtServer();
-
     @Override
     public void nativeOnConnected(String macAddress) {
         Log.d(JNI_TAG, "블루투스 클라이언트 연결 감지됨 : " + macAddress);
@@ -50,26 +44,51 @@ public class MainActivity extends AppCompatActivity implements NativeBTStatusLis
         // Send
         byte[] data = "C".getBytes(); // 문자열 "C"를 바이트 배열로 변환
 
-        nativeBtServer.nativeSend(data, data.length);
+        NativeBtServer.nativeSend(data, data.length);
         Log.w(JNI_TAG, "1-1. [TX] C");
 
         // Receive
         byte[] buffer = new byte[1];
-        int len = nativeBtServer.nativeRead(buffer);
+        int len = NativeBtServer.nativeRead(buffer);
 
         Log.d(JNI_TAG, "수신된 버퍼 사이즈 : " + len);
-        Log.d(JNI_TAG, "수신된 버퍼 내용 : " + Arrays.toString(buffer));
+        Log.d(JNI_TAG, "수신된 버퍼 내용 : " + buffer.toString());
 
         if (len == 1 && buffer[0] == "C".getBytes()[0]) {
             Log.w(JNI_TAG, "2-2. [RX] C");
         }
 
-        // 헤더 수신부
         buffer = new byte[128];
-        len = nativeBtServer.nativeRead(buffer);
+        len = NativeBtServer.nativeRead(buffer);
 
-        Log.d(JNI_TAG, "수신된 버퍼 사이즈 : " + len);
-        Log.d(JNI_TAG, "수신된 버퍼 내용 : " + Arrays.toString(buffer));
+        Log.d(JNI_TAG, "3-2. 수신된 버퍼 사이즈 : " + len);
+        Log.d(JNI_TAG, "3-2. 수신된 버퍼 내용 : " + Arrays.toString(buffer));
+
+        buffer = new byte[1];
+        buffer[0] = 0x06; // ACK
+        NativeBtServer.nativeSend(buffer, 1);
+        Log.d(JNI_TAG, "4-1. [TX] ACK");
+
+        // 헤더 수신부
+        int count = 0;
+        buffer = new byte[1024];
+
+        while (true) {
+            len = NativeBtServer.nativeRead(buffer);
+
+            Log.d(JNI_TAG, "5-2. " + count++ + "번째, 길이 : " + len);
+
+            if (len < 128) {
+                Log.d(JNI_TAG, "5-2. 수신된 버퍼 내용 : " + Arrays.toString(buffer));
+            }
+
+            try {
+                Thread.sleep(50);
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
+        }
+
 
         // 헤더 수신값 각 변수에 초기화하기 / 수신 데이터 예시)  init 10000 0 1 0
         // 1. 처음 들어온 값이
@@ -83,22 +102,6 @@ public class MainActivity extends AppCompatActivity implements NativeBTStatusLis
         Log.d(JNI_TAG, "블루투스 클라이언트 연결 해제 감지됨");
 
         // TODO : 추가 로직 작성하기 (재연결 시도 등)
-    }
-
-    /**
-     * JNI를 통한 네이티브 Bluetooth 서버 클래스 (기존 기능 유지)
-     */
-    public class NativeBtServer {
-        // JNI 연결되는 함수들
-        public native int createBluetoothServer();                        // RFCOMM 소켓 생성 및 클라이언트 accept
-        public native boolean nativeIsConnected();                        // 연결 상태 확인용
-        public native void nativeClose();                                 // 연결 종료
-
-        public native int nativeSend(byte[] buffer, int length);          // TX
-        public native int nativeRead(byte[] buffer);                      // RX
-
-        // JNI CallBack
-        public native void setListener(NativeBTStatusListener listener);  // 블루투스 상태 변화 시, callback 받음
     }
 
     /**
@@ -180,8 +183,7 @@ public class MainActivity extends AppCompatActivity implements NativeBTStatusLis
     @Override
     protected void onDestroy() {
         super.onDestroy();
-        nativeBtServer.nativeClose();
-        nativeBtServer = null;
+        NativeBtServer.nativeClose();
 
         // 브로드캐스트 리시버 해제
         try {
@@ -216,8 +218,8 @@ public class MainActivity extends AppCompatActivity implements NativeBTStatusLis
     private void startNativeBluetoothServer() {
         new Thread(() -> {
             // init 설정
-            nativeBtServer.setListener(this);
-            nativeBtServer.createBluetoothServer();  // JNI 호출
+            NativeBtServer.setListener(this);
+            NativeBtServer.createBluetoothServer();  // JNI 호출
             Log.w("NativeBT", "네이티브 서버 시작 완료");
         }).start();
     }
