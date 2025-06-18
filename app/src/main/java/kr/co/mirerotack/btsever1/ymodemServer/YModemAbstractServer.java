@@ -1,6 +1,5 @@
 package kr.co.mirerotack.btsever1.ymodemServer;
 
-import android.bluetooth.BluetoothSocket;
 import android.content.Context;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
@@ -38,7 +37,7 @@ import static kr.co.mirerotack.btsever1.utils.readwriteJson.updateTimestampToFil
  * YModem 서버 공통 추상 클래스 - TCP와 Bluetooth의 중복 코드를 통합
  * 실제 소켓 연결 부분만 하위 클래스에서 구현하고, YModem 프로토콜 처리는 공통화
  */
-public abstract class AbstractYModemServer implements YModemServerInterface {
+public abstract class YModemAbstractServer implements YModemServerInterface {
     // YModem 프로토콜 상수들 (공통)
     protected static final byte SOH = 0x01; /* 128바이트 패킷 시작 */
     protected static final byte STX = 0x02; /* 1024바이트 패킷 시작 */
@@ -68,7 +67,7 @@ public abstract class AbstractYModemServer implements YModemServerInterface {
      * @param apkDownloadPath APK 다운로드 경로
      * @param context 애플리케이션 컨텍스트
      */
-    public AbstractYModemServer(File apkDownloadPath, Context context) {
+    public YModemAbstractServer(File apkDownloadPath, Context context) {
         this.APK_PATH = apkDownloadPath;
         this.context = context;
     }
@@ -279,7 +278,7 @@ public abstract class AbstractYModemServer implements YModemServerInterface {
                 receivedFile.delete();
             }
         } catch (Exception e) {
-            logMessage("[X] " + getServerType() + " YModem 처리 중 오류 발생: " + e.getMessage());
+            logMessage("[X] " + getServerType() + " YModem 처리 중 오류 발생: " + e.getCause() + ", " + e.getMessage());
             if (saveDirectory.exists()) saveDirectory.delete();
             handleError(e);
         } finally {

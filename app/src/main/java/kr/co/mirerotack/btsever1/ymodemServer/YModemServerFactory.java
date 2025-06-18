@@ -23,9 +23,9 @@ public class YModemServerFactory {
     public static YModemServerInterface createServer(ServerType serverType, File apkDownloadPath, Context context) {
         switch (serverType) {
             case TCP:
-                return new YModemTCPServerImpl(apkDownloadPath, context);
+                return new YModemTCPAbstractServerImpl(apkDownloadPath, context);
             case BLUETOOTH:
-                return new YModemBluetoothServerImpl(apkDownloadPath, context);
+                return new YModemBluetoothAbstractServerImpl(apkDownloadPath, context);
             default:
                 throw new IllegalArgumentException("지원하지 않는 서버 타입입니다: " + serverType);
         }

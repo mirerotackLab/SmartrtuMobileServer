@@ -21,7 +21,7 @@ import static kr.co.mirerotack.btsever1.utils.Logger.logMessage;
  * TCP 서버 구현체 - AbstractYModemServer를 상속받아 TCP 소켓 전용 로직만 구현
  * YModem 프로토콜 처리는 부모 클래스에서 공통으로 처리되므로 여기서는 TCP 연결 관리만 담당
  */
-public class YModemTCPServerImpl extends AbstractYModemServer {
+public class YModemTCPAbstractServerImpl extends YModemAbstractServer {
     private static final String TAG = "YModemTcpServer"; // 로그 출력용 태그
     private static final int SEND_RECEIVE_BUFFER_SIZE = 32 * 1024; // 송수신 버퍼 크기 (100KB)
 
@@ -33,7 +33,7 @@ public class YModemTCPServerImpl extends AbstractYModemServer {
      * @param apkDownloadPath APK 파일을 저장할 디렉토리 경로
      * @param context Android 애플리케이션 컨텍스트 (파일 시스템 접근용)
      */
-    public YModemTCPServerImpl(File apkDownloadPath, Context context) {
+    public YModemTCPAbstractServerImpl(File apkDownloadPath, Context context) {
         super(apkDownloadPath, context); // 부모 클래스의 공통 초기화 실행
     }
 
