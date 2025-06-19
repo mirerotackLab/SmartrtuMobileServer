@@ -20,6 +20,7 @@ import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
 
+import kr.co.mirerotack.btsever1.NativeBtServer;
 import kr.co.mirerotack.btsever1.RtuSnapshot;
 import kr.co.mirerotack.btsever1.model.ApkValidationResult;
 import kr.co.mirerotack.btsever1.model.InstallResult;
@@ -60,8 +61,6 @@ public abstract class YModemAbstractServer implements YModemServerInterface {
     protected Gson gson = new Gson();
 
     private Thread serverThread;
-    private Thread triggerThread;
-
     /**
      * 공통 생성자
      * @param apkDownloadPath APK 다운로드 경로
@@ -76,6 +75,7 @@ public abstract class YModemAbstractServer implements YModemServerInterface {
      * 하위 클래스에서 구현해야 할 추상 메서드들 (서버별 고유 로직)
      */
     protected abstract void startServerSocket(int port) throws IOException;
+    protected abstract void closeServerSocket() throws IOException;
     protected abstract Object acceptClientConnection() throws IOException;
     protected abstract InputStream getInputStream(Object clientConnection) throws IOException;
     protected abstract OutputStream getOutputStream(Object clientConnection) throws IOException;
@@ -94,7 +94,7 @@ public abstract class YModemAbstractServer implements YModemServerInterface {
                 while (isRunning) {
                     try {
                         // 기존 서버 소켓을 먼저 정리
-                        closeExistingServerSocket();
+                        closeServerSocket();
 
                         // 서버 소켓 시작 (하위 클래스에서 구현)
                         startServerSocket(port);
@@ -140,48 +140,8 @@ public abstract class YModemAbstractServer implements YModemServerInterface {
                 }
             }
         });
+
         serverThread.start();
-
-        triggerThread = new Thread(new Runnable() {
-            @Override
-            public void run() {
-                Socket triggerSocket = null;
-                OutputStream out = null;
-
-                try {
-                    triggerSocket = (Socket) acceptClientConnection();
-                } catch (IOException e) {
-                    logMessage("[X] TriggerThread: 연결 실패 또는 전송 오류: " + e.getCause() + ": " + e.getMessage());
-                    waitSeconds(5000);
-                }
-
-                while (isRunning) {
-                    if (triggerSocket == null || !triggerSocket.isConnected()) {
-                        logMessage("triggerSocket: close or disconnected");
-                    }
-
-                    try {
-                        out = triggerSocket.getOutputStream();
-                        boolean isSuccess = sendTriggerData(context, out, 77.7f, 123);
-
-                        // 클라이언트가 연결을 종료해서 실패한 경우, 새로운 소켓 연결을 대기함
-                        if (!isSuccess) {
-                            try {
-                                triggerSocket = (Socket) acceptClientConnection();
-                            } catch (IOException e) {
-                                logMessage("[X] TriggerThread: 연결 실패 또는 전송 오류: " + e.getCause() + ": " + e.getMessage());
-                                waitSeconds(5000);
-                            }
-                            continue;
-                        }
-                        waitSeconds(1000);
-                    } catch (IOException e) {
-                        throw new RuntimeException(e);
-                    }
-                }
-            }
-        });
-        triggerThread.start();
     }
 
     @Override
@@ -189,7 +149,6 @@ public abstract class YModemAbstractServer implements YModemServerInterface {
         isRunning = false;
         try {
             serverThread.stop();
-            triggerThread.stop();
         } catch (RuntimeException e) {
             logMessage("[X] " + getServerType() + " Server thread already stopped: " + e.getMessage());
         }
@@ -198,7 +157,7 @@ public abstract class YModemAbstractServer implements YModemServerInterface {
     }
 
     /**
-     * 🔥 핵심 메서드: YModem 파일 처리 로직 (완전히 공통화)
+     * 핵심 메서드: YModem 파일 처리 로직 (완전히 공통화)
      * TCP든 Bluetooth든 동일한 로직으로 처리
      * @param clientConnection 클라이언트 연결 객체 (Socket 또는 BluetoothSocket)
      */
@@ -218,13 +177,13 @@ public abstract class YModemAbstractServer implements YModemServerInterface {
             YModem yModem = new YModem(inputStream, outputStream);
 
             // 1️⃣ [RX] 헤더 수신
-            logMessage("3. Starting to receive header...");
-            File receivedHeader = yModem.receive_Header(saveDirectory, true);
+            logMessage("3. 헤더 수신 대기...");
+            File receivedHeader = yModem.receive_Header(saveDirectory, getServerType(), true);
             if (receivedHeader == null) {
-                throw new IOException("[X] 3-101. Failed to receive header!");
+                throw new IOException("[X] 3-101. 헤더 수신 실패!");
             }
 
-            logMessage("[O] 3-2. Header received successfully");
+            logMessage("[O] 3-2. 헤더 수신 완료");
             sendByte(outputStream, ACK, "4-1. [TX] ACK");
 
             if (yModem.getIsSyncDataMode()) {
@@ -234,9 +193,12 @@ public abstract class YModemAbstractServer implements YModemServerInterface {
             }
 
             if (yModem.getIsRebootMode()) {
-                logMessage("handleRebootMode Start");
-                Process processStart = Runtime.getRuntime().exec("ssu -c reboot");
-                processStart.waitFor();
+                handler.postDelayed(new Runnable() {
+                    @Override
+                    public void run() {
+                        rebootDevice();
+                    }
+                }, 5000);
                 return;
             }
 
@@ -292,7 +254,6 @@ public abstract class YModemAbstractServer implements YModemServerInterface {
         }
     }
 
-    // 🔥 이하 모든 메서드들은 완전히 공통화된 YModem 프로토콜 처리 로직
     protected boolean syncData(Context context, InputStream inputStream, OutputStream outputStream) throws IOException {
         try {
             RtuSnapshot snapshot;
@@ -333,7 +294,6 @@ public abstract class YModemAbstractServer implements YModemServerInterface {
         }
     }
 
-    // 🔥 이하 모든 메서드들은 완전히 공통화된 YModem 프로토콜 처리 로직
     protected boolean sendTriggerData(Context context, OutputStream outputStream,
                                       float waterLevel, int rtuId) throws IOException {
         try {

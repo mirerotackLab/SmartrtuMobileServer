@@ -2,6 +2,7 @@ package kr.co.mirerotack.btsever1.ymodemServer;
 
 import android.util.Log;
 
+import java.io.BufferedInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -35,8 +36,8 @@ public class Modem {
 
     protected static final int MAXERRORS = 10;
 
-    protected static final int BLOCK_TIMEOUT = 10_000;
-    protected static final int REQUEST_TIMEOUT = 3_000;
+    protected static final int BLOCK_TIMEOUT = 20_000;
+    protected static final int REQUEST_TIMEOUT = 10_000; // "C" 수신 타임아웃
     protected static final int WAIT_FOR_RECEIVER_TIMEOUT = 60_000;
     protected static final int SEND_BLOCK_TIMEOUT = 10_000;
 
@@ -104,9 +105,11 @@ public class Modem {
 
             timer.start(); // 타이머 시작
 
-            character = readByte(timer); // 📥 송신자로부터 응답 수신
+            character = readByte(timer); // 송신자로부터 응답 수신
             if (character == 'C') {
                 logMessage("2-2. [RX] C");
+            } else {
+                logMessage("2-2. [RX] C 아님 -> " + character);
             }
 
             try {
@@ -115,11 +118,13 @@ public class Modem {
 
                     if (character == SOH || character == STX) {
                         // 📌 송신자가 데이터 블록 전송을 시작하면 해당 블록 타입(SOH/STX)을 반환
+                        logMessage("[O] character : " + character);
                         return character;
                     }
                 }
             } catch (TimeoutException ignored) {
                 // 📌 타임아웃 발생 시 재시도
+                logMessage("[X] Timeout, 수신된 데이터 없음");
                 errorCount++;
             }
         }
@@ -159,9 +164,9 @@ public class Modem {
         }
     }
 
-    private void shortSleep() {
+    private void shortSleep(int ms) {
         try {
-            Thread.sleep(10);
+            Thread.sleep(ms);
         } catch (InterruptedException e) {
             try {
                 interruptTransmission();
@@ -194,18 +199,18 @@ public class Modem {
      * @throws SynchronizationLostException 블록 동기화 오류 발생 시
      * @throws InvalidBlockException        블록 데이터 오류 발생 시
      */
-    // STX(1)는 이미 읽고 호출함 + 블록번호(1) + 블록번호 보수(1) + 데이터(1024) + CRC(2)
+    // STX(1)는 이미 읽고 호출함 + 블록번호(1) + 블록번호 보수(1) + 데이터(512) + CRC(2)
     protected byte[] readBlock(int blockNumber, boolean shortBlock, YModemCRC16 YModemCrc16, int packet_number, int totalPacketSize)
             throws IOException, TimeoutException, RepeatedBlockException, SynchronizationLostException, InvalidBlockException {
 
-        // 📌 1. 블록 버퍼 할당 (128바이트 or 1024바이트)
+        // 📌 1. 블록 버퍼 할당 (128바이트 or 512바이트)
         byte[] block;
         Timer timer = new Timer(BLOCK_TIMEOUT).start(); // 타임아웃 설정
 
         if (shortBlock) {
             block = shortBlockBuffer; // 128바이트 버퍼
         } else {
-            block = longBlockBuffer; // 1024바이트 버퍼
+            block = longBlockBuffer; // 512바이트 버퍼
         }
 
         // 📌 2. 블록 번호 수신 (보낸 블록과 동일해야 함)
@@ -279,16 +284,25 @@ public class Modem {
     }
 
     private byte readByte(Timer timer) throws IOException, TimeoutException {
-        while (true) {
-            if (inputStream.available() > 0) {
-                int b = inputStream.read();
-                return (byte) b;
+        timer.start();
+
+        while (!timer.isExpired()) {
+            try {
+                Log.d(TAG, "수신 가능한 바이트 수 : " + inputStream.available());
+                if (inputStream.available() > 0) {
+                    return (byte) inputStream.read(); // blocking read
+                }
+            } catch (IOException e) {
+                shortSleep(5000); // 일시적 실패 대비
             }
-            if (timer.isExpired()) {
-                throw new TimeoutException();
-            }
-            shortSleep();
         }
+
+         // TODO : TCP는 아래와 같이 씀
+         // if (inputStream.available() > 0) {
+         //     return (byte) inputStream.read(); // blocking read
+         // }
+
+        throw new TimeoutException();
     }
 
     /**

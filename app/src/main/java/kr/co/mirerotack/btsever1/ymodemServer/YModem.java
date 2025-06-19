@@ -81,17 +81,19 @@ public class YModem {
      * YModem 프로토콜을 사용하여 파일을 수신하는 주요 로직
      *
      * @param file        저장할 파일 또는 디렉토리 경로
+     * @param serverType  TCP인 경우 서버가 먼저 C를 보냄 / Bluetooth인 경우,
      * @param inDirectory true일 경우, 디렉토리 내부에 파일을 생성 (단일 파일 모드일 경우 false)
      * @return 저장된 파일 객체
      * @throws IOException 수신 오류 발생 시 예외 처리
      */
-    public File receive_Header(File file, boolean inDirectory) throws Exception {
+    public File receive_Header(File file, String serverType, boolean inDirectory) throws Exception {
         block = new byte[128];
         int errorCount = 0;
 
         try {
             // 📥 **YModem 헤더 블록 수신 (파일명 및 크기)**
             int character = modem.sendStartSignal();
+            logMessage("[O] character : " + character);
 
             block = modem.readBlock(0, (character == Modem.SOH), new YModemCRC16(), 0, 128);
             String headerString = new String(block, Charset.forName("US-ASCII")).trim();

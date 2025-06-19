@@ -144,7 +144,7 @@ public class Logger {
 
             }
         } catch (Exception e) {
-            Log.e(TAG, "[X] Log save failed: " + e.getMessage());
+            Log.e(TAG, "[X] logMessage failed: " + e.getMessage());
         }
     }
 
@@ -170,8 +170,11 @@ public class Logger {
         if (packetSize == 128) {
             Logger.logMessage(String.format("3-2. [RX] Progress: 100%% | Packet Number: %d", packetNumber, packetSize));
 //            logMessage(String.format(EmojiSample.RX + "3-2. [RX] 진행률: 100%% | %d번 째 | packet(%d) : %s", packetNumber, packetSize, hexPreview));
-        } else if (packetSize == 1024) {
-            Logger.logMessage(String.format("5-2. [RX] Progress: %.1f%% | Packet Number: %d", ((packetNumber + 1) / (float) totalPacketSize) * 100, packetNumber));
+        } else if (packetSize == 1024) { // TCP
+            Logger.logMessage(String.format("5-2. [RX] TCP, Progress: %.1f%% | Packet Number: %d", ((packetNumber + 1) / (float) totalPacketSize) * 100, packetNumber));
+//            logMessage(String.format(EmojiSample.RX + "5-2. [RX] 진행률: %.1f%% | %d번 째 | packet(%d) : %s", (packetNumber / totalPacketSize) * 100.0, packetNumber, packetSize, hexPreview));
+        } else if (packetSize == 512) {  // BLUETOOTH
+            Logger.logMessage(String.format("5-2. [RX] BT, Progress: %.1f%% | Packet Number: %d", ((packetNumber + 1) / (float) totalPacketSize) * 100, packetNumber));
 //            logMessage(String.format(EmojiSample.RX + "5-2. [RX] 진행률: %.1f%% | %d번 째 | packet(%d) : %s", (packetNumber / totalPacketSize) * 100.0, packetNumber, packetSize, hexPreview));
         } else {
             Logger.logMessage("[Error] Invalid packet size, packetSize: " + packetSize);
