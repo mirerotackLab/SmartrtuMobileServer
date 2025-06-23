@@ -72,7 +72,7 @@ public class NativeBluetoothInputStream extends InputStream {
     }
 
     @Override
-    public int available() throws IOException {
+    public int available() {
         // This method should be overridden by subclasses.
         // -> 기본 자바 클래스에서 상위 클래스에 구현을 위임함.
         return NativeBtServer.nativeAvailable();

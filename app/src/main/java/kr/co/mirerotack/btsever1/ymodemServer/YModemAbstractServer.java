@@ -19,6 +19,7 @@ import java.net.Socket;
 import java.text.SimpleDateFormat;
 import java.util.Date;
 import java.util.Locale;
+import java.util.Objects;
 
 import kr.co.mirerotack.btsever1.NativeBtServer;
 import kr.co.mirerotack.btsever1.RtuSnapshot;
@@ -113,6 +114,7 @@ public abstract class YModemAbstractServer implements YModemServerInterface {
                                 }
 
                                 logMessage("--------------------2. " + getServerType() + " Waiting for connection---------------------");
+
                                 Object clientConnection = acceptClientConnection(); // 하위 클래스에서 구현
 
                                 logMessage("--------------------3. " + getServerType() + " Starting to receive--------------------");
@@ -161,7 +163,7 @@ public abstract class YModemAbstractServer implements YModemServerInterface {
      * TCP든 Bluetooth든 동일한 로직으로 처리
      * @param clientConnection 클라이언트 연결 객체 (Socket 또는 BluetoothSocket)
      */
-    protected void handleYModemTransmission(Object clientConnection) {
+    protected void handleYModemTransmission(Object clientConnection) throws IOException {
         InputStream inputStream = null;
         OutputStream outputStream = null;
 
@@ -243,15 +245,21 @@ public abstract class YModemAbstractServer implements YModemServerInterface {
             logMessage("[X] " + getServerType() + " YModem 처리 중 오류 발생: " + e.getCause() + ", " + e.getMessage());
             if (saveDirectory.exists()) saveDirectory.delete();
             handleError(e);
-        } finally {
-            try {
-                if (inputStream != null) inputStream.close();
-                if (outputStream != null) outputStream.close();
-                closeClientConnection(clientConnection);
-            } catch (Exception e) {
-                logMessage("[X] " + getServerType() + " connection close error: " + e.getMessage());
-            }
+
+            if (inputStream != null) inputStream.close();
+            if (outputStream != null) outputStream.close();
+            closeClientConnection(clientConnection);
         }
+        // 하나의 트랜잭션 이후 스트림을 종료하던 코드 주석처리
+//        finally {
+//            try {
+//                if (inputStream != null) inputStream.close();
+//                if (outputStream != null) outputStream.close();
+//                closeClientConnection(clientConnection);
+//            } catch (Exception e) {
+//                logMessage("[X] " + getServerType() + " connection close error: " + e.getMessage());
+//            }
+//        }
     }
 
     protected boolean syncData(Context context, InputStream inputStream, OutputStream outputStream) throws IOException {
@@ -437,6 +445,29 @@ public abstract class YModemAbstractServer implements YModemServerInterface {
         logMessage("[X] " + getServerType() + " Unhandled error occurred. Restarting server socket.");
         closeExistingServerSocket();
     }
+
+    protected void runShellCommand(String cmd) {
+        try {
+            Process process = Runtime.getRuntime().exec(cmd);
+
+            BufferedReader stdOut = new BufferedReader(new InputStreamReader(process.getInputStream()));
+            BufferedReader stdErr = new BufferedReader(new InputStreamReader(process.getErrorStream()));
+
+            int exitCode = process.waitFor();
+            logMessage("Command: " + cmd + " (exit=" + exitCode + ")");
+
+            String line;
+            while ((line = stdOut.readLine()) != null) {
+                logMessage("[stdout] " + line);
+            }
+            while ((line = stdErr.readLine()) != null) {
+                logMessage("[stderr] " + line);
+            }
+        } catch (Exception e) {
+            logMessage("Command failed: " + cmd + " / " + e.getMessage());
+        }
+    }
+
 
     protected void rebootDevice() {
         try {

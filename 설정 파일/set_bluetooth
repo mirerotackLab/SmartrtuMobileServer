@@ -25,12 +25,23 @@ if ! hciconfig | grep -q hci0; then
 fi
 
 # hci0가 이미 활성 상태인지 체크
-if hciconfig hci0 | grep -q "UP RUNNING"; then
-    addLog "[SKIP] hci0 이미 활성 상태. 별도 작업 안 함 -> 종료"
+if hciconfig hci0 | grep -q "UP RUNNING PSCAN ISCAN"; then
+    addLog "[SKIP] hci0 이미 PISCAN 활성 상태. 별도 작업 안 함 -> 종료"
     exit 0
 fi
 
-addLog "[ACTION] hci0 탐지됨. 블루투스 초기화 시작"
+addLog "[ACTION] hci0 탐지됨. 블루투스 초기화 시작 (down, up, piscan, name 설정)"
+
+hciconfig hci0 down
+sleep 1
+hciconfig hci0 up
+sleep 2
+hciconfig hci0 piscan
+sleep 1
+hciconfig hci0 name SmartRTU_Dongle
+sleep 1
+
+addLog "[ACTION] 블루투스 초기화 끝"
 
 # 이전 agent 프로세스 종료
 ps | grep '[a]gent' | while read line; do
@@ -39,18 +50,39 @@ ps | grep '[a]gent' | while read line; do
     kill -9 "$pid"
 done
 
-hciconfig hci0 down
 sleep 2
-hciconfig hci0 up
-sleep 2
-hciconfig hci0 piscan
 
-addLog "[ACTION] 블루투스 초기화 끝"
+# agent 실행
+if [ -x /system/xbin/agent ]; then
+    /system/xbin/agent --adapter hci0 "$PASSWORD" >> "$AGENT_LOG_GILE_PATH" 2>&1 &
+    addLog "[START] agent 실행 완료"
+else
+    addLog "[ERROR] agent 실행 파일 없음"
+fi
 
-## agent 실행
-#if [ -x /system/xbin/agent ]; then
-#    /system/xbin/agent --adapter hci0 "$PASSWORD" >> "$AGENT_LOG_GILE_PATH" 2>&1 &
-#    addLog "[START] agent 실행 완료"
-#else
-#    addLog "[ERROR] agent 실행 파일 없음"
-#fi
+
+# agent 실행 여부 확인 → 없으면 실행
+if ps | grep -q '[a]gent'; then
+    addLog "[SKIP] agent 이미 실행 중 → 실행하지 않음"
+else
+    if [ -x /system/xbin/agent ]; then
+        /system/xbin/agent --adapter hci0 "$PASSWORD" >> "$AGENT_LOG_FILE_PATH" 2>&1 &
+        addLog "[START] agent 실행 명령 전송됨"
+
+        # 실행되었는지 최대 5초까지 감시
+        for i in 1 2 3 4 5; do
+            sleep 1
+            if ps | grep -q '[a]gent'; then
+                addLog "[CHECK] agent 프로세스 확인됨 (실행 성공)"
+                break
+            fi
+        done
+
+        # 그래도 없다면 실패 처리
+        if ! ps | grep -q '[a]gent'; then
+            addLog "[ERROR] agent 실행 실패 (5초 내 프로세스 확인 불가)"
+        fi
+    else
+        addLog "[ERROR] agent 실행 파일 없음"
+    fi
+fi

@@ -37,8 +37,8 @@ public class Modem {
     protected static final int MAXERRORS = 10;
 
     protected static final int BLOCK_TIMEOUT = 20_000;
-    protected static final int REQUEST_TIMEOUT = 10_000; // "C" 수신 타임아웃
-    protected static final int WAIT_FOR_RECEIVER_TIMEOUT = 60_000;
+    protected static final int REQUEST_TIMEOUT = 10_000;
+    protected static final int WAIT_FOR_RECEIVER_TIMEOUT = 3_600_000; // 1시간
     protected static final int SEND_BLOCK_TIMEOUT = 10_000;
 
     private final String TAG = "TCPCOM";
@@ -96,7 +96,7 @@ public class Modem {
         int errorCount = 0; // 오류 횟수 카운트
 
         // 1. 송신자의 첫 번째 데이터 블록 수신 대기
-        Timer timer = new Timer(REQUEST_TIMEOUT); // 타임아웃 타이머 설정
+        Timer timer = new Timer(WAIT_FOR_RECEIVER_TIMEOUT); // 타임아웃 타이머 설정
 
         while (errorCount < MAXERRORS) {
             // 📤 전송 시작 요청 (송신자가 응답할 때까지 반복 전송)
@@ -288,7 +288,7 @@ public class Modem {
 
         while (!timer.isExpired()) {
             try {
-                Log.d(TAG, "수신 가능한 바이트 수 : " + inputStream.available());
+                // `Log.d(TAG, "수신 가능한 바이트 수 : " + inputStream.available());
                 if (inputStream.available() > 0) {
                     return (byte) inputStream.read(); // blocking read
                 }

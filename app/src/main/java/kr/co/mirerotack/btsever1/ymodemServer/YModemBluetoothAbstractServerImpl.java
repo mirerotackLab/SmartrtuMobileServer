@@ -50,7 +50,7 @@ public class YModemBluetoothAbstractServerImpl extends YModemAbstractServer impl
 
     @Override
     protected String getServerType() {
-        return "Bluetooth(JNI)";
+        return "BLUETOOTH";
     }
 
     /**

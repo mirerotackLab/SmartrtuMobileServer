@@ -307,6 +307,6 @@ Java_kr_co_mirerotack_btsever1_NativeBtServer_nativeAvailable(JNIEnv *env, jclas
         return 0;
     }
 
-    LOGI("nativeAvailable: 수신 가능 바이트 수 = %d", count);
+    // LOGI("nativeAvailable: 수신 가능 바이트 수 = %d", count);
     return count;
 }
