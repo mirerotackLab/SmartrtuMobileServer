@@ -15,14 +15,12 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.RandomAccessFile;
-import java.net.Socket;
-import java.text.SimpleDateFormat;
-import java.util.Date;
-import java.util.Locale;
+import java.nio.charset.StandardCharsets;
 
-import kr.co.mirerotack.btsever1.RtuSnapshot;
+import kr.co.mirerotack.btsever1.model.RtuSnapshot;
 import kr.co.mirerotack.btsever1.model.ApkValidationResult;
 import kr.co.mirerotack.btsever1.model.InstallResult;
+import kr.co.mirerotack.btsever1.model.RtuSnapshotType;
 import kr.co.mirerotack.btsever1.model.UninstallResult;
 import kr.co.mirerotack.btsever1.model.YModemServerInterface;
 
@@ -48,6 +46,9 @@ public abstract class YModemAbstractServer implements YModemServerInterface {
     protected static final byte CPMEOF = 0x1A; /* 마지막 패딩 */
     protected static final byte START_ACK = 'C'; /* YModem 시작 신호 */
 
+    private static final byte HEADER_ALL = 0x41;      // 전체 동기화 == "A"
+    private static final byte HEADER_TRIGGER = 0x54;  // 트리거 데이터 == "T"
+
     // 공통 필드들
     protected File APK_PATH;
     protected String PackageBasePath = "kr.co.mirerotack";
@@ -60,8 +61,6 @@ public abstract class YModemAbstractServer implements YModemServerInterface {
     protected Gson gson = new Gson();
 
     private Thread serverThread;
-    private Thread triggerThread;
-
     /**
      * 공통 생성자
      * @param apkDownloadPath APK 다운로드 경로
@@ -76,6 +75,7 @@ public abstract class YModemAbstractServer implements YModemServerInterface {
      * 하위 클래스에서 구현해야 할 추상 메서드들 (서버별 고유 로직)
      */
     protected abstract void startServerSocket(int port) throws IOException;
+    protected abstract void closeServerSocket() throws IOException;
     protected abstract Object acceptClientConnection() throws IOException;
     protected abstract InputStream getInputStream(Object clientConnection) throws IOException;
     protected abstract OutputStream getOutputStream(Object clientConnection) throws IOException;
@@ -94,7 +94,7 @@ public abstract class YModemAbstractServer implements YModemServerInterface {
                 while (isRunning) {
                     try {
                         // 기존 서버 소켓을 먼저 정리
-                        closeExistingServerSocket();
+                        closeServerSocket();
 
                         // 서버 소켓 시작 (하위 클래스에서 구현)
                         startServerSocket(port);
@@ -113,6 +113,7 @@ public abstract class YModemAbstractServer implements YModemServerInterface {
                                 }
 
                                 logMessage("--------------------2. " + getServerType() + " Waiting for connection---------------------");
+
                                 Object clientConnection = acceptClientConnection(); // 하위 클래스에서 구현
 
                                 logMessage("--------------------3. " + getServerType() + " Starting to receive--------------------");
@@ -140,48 +141,8 @@ public abstract class YModemAbstractServer implements YModemServerInterface {
                 }
             }
         });
+
         serverThread.start();
-
-        triggerThread = new Thread(new Runnable() {
-            @Override
-            public void run() {
-                Socket triggerSocket = null;
-                OutputStream out = null;
-
-                try {
-                    triggerSocket = (Socket) acceptClientConnection();
-                } catch (IOException e) {
-                    logMessage("[X] TriggerThread: 연결 실패 또는 전송 오류: " + e.getCause() + ": " + e.getMessage());
-                    waitSeconds(5000);
-                }
-
-                while (isRunning) {
-                    if (triggerSocket == null || !triggerSocket.isConnected()) {
-                        logMessage("triggerSocket: close or disconnected");
-                    }
-
-                    try {
-                        out = triggerSocket.getOutputStream();
-                        boolean isSuccess = sendTriggerData(context, out, 77.7f, 123);
-
-                        // 클라이언트가 연결을 종료해서 실패한 경우, 새로운 소켓 연결을 대기함
-                        if (!isSuccess) {
-                            try {
-                                triggerSocket = (Socket) acceptClientConnection();
-                            } catch (IOException e) {
-                                logMessage("[X] TriggerThread: 연결 실패 또는 전송 오류: " + e.getCause() + ": " + e.getMessage());
-                                waitSeconds(5000);
-                            }
-                            continue;
-                        }
-                        waitSeconds(1000);
-                    } catch (IOException e) {
-                        throw new RuntimeException(e);
-                    }
-                }
-            }
-        });
-        triggerThread.start();
     }
 
     @Override
@@ -189,7 +150,6 @@ public abstract class YModemAbstractServer implements YModemServerInterface {
         isRunning = false;
         try {
             serverThread.stop();
-            triggerThread.stop();
         } catch (RuntimeException e) {
             logMessage("[X] " + getServerType() + " Server thread already stopped: " + e.getMessage());
         }
@@ -198,11 +158,11 @@ public abstract class YModemAbstractServer implements YModemServerInterface {
     }
 
     /**
-     * 🔥 핵심 메서드: YModem 파일 처리 로직 (완전히 공통화)
+     * 핵심 메서드: YModem 파일 처리 로직 (완전히 공통화)
      * TCP든 Bluetooth든 동일한 로직으로 처리
      * @param clientConnection 클라이언트 연결 객체 (Socket 또는 BluetoothSocket)
      */
-    protected void handleYModemTransmission(Object clientConnection) {
+    protected void handleYModemTransmission(Object clientConnection) throws IOException {
         InputStream inputStream = null;
         OutputStream outputStream = null;
 
@@ -218,13 +178,13 @@ public abstract class YModemAbstractServer implements YModemServerInterface {
             YModem yModem = new YModem(inputStream, outputStream);
 
             // 1️⃣ [RX] 헤더 수신
-            logMessage("3. Starting to receive header...");
-            File receivedHeader = yModem.receive_Header(saveDirectory, true);
+            logMessage("3. 헤더 수신 대기...");
+            File receivedHeader = yModem.receive_Header(saveDirectory, getServerType(), true);
             if (receivedHeader == null) {
-                throw new IOException("[X] 3-101. Failed to receive header!");
+                throw new IOException("[X] 3-101. 헤더 수신 실패!");
             }
 
-            logMessage("[O] 3-2. Header received successfully");
+            logMessage("[O] 3-2. 헤더 수신 완료");
             sendByte(outputStream, ACK, "4-1. [TX] ACK");
 
             if (yModem.getIsSyncDataMode()) {
@@ -234,15 +194,19 @@ public abstract class YModemAbstractServer implements YModemServerInterface {
             }
 
             if (yModem.getIsRebootMode()) {
-                logMessage("handleRebootMode Start");
-                Process processStart = Runtime.getRuntime().exec("ssu -c reboot");
-                processStart.waitFor();
+                handler.postDelayed(new Runnable() {
+                    @Override
+                    public void run() {
+                        logMessage("5초 뒤, reboot 수행");
+                        rebootDevice();
+                    }
+                }, 5000);
                 return;
             }
 
             // 2️⃣ [RX] APK 수신
             logMessage("5. Waiting for APK data...");
-            File receivedFile = yModem.receive_APK(new File(""), false);
+            File receivedFile = yModem.receive_APK(new File(""), false, getServerType());
 
             if (!checkFileIntegrity(receivedFile, yModem.getExpectedFileSize(), outputStream))
                 return;
@@ -254,7 +218,7 @@ public abstract class YModemAbstractServer implements YModemServerInterface {
             waitSeconds(3000);
 
             while (true) {
-                if (receiveByte(inputStream) == EOT) {
+                if (inputStream.read() == EOT) {
                     logMessage("7-4. [RX] EOT");
                     break;
                 }
@@ -281,7 +245,13 @@ public abstract class YModemAbstractServer implements YModemServerInterface {
             logMessage("[X] " + getServerType() + " YModem 처리 중 오류 발생: " + e.getCause() + ", " + e.getMessage());
             if (saveDirectory.exists()) saveDirectory.delete();
             handleError(e);
-        } finally {
+
+            if (inputStream != null) inputStream.close();
+            if (outputStream != null) outputStream.close();
+            closeClientConnection(clientConnection);
+        }
+
+        if (getServerType().equals("TCP")) {
             try {
                 if (inputStream != null) inputStream.close();
                 if (outputStream != null) outputStream.close();
@@ -292,7 +262,6 @@ public abstract class YModemAbstractServer implements YModemServerInterface {
         }
     }
 
-    // 🔥 이하 모든 메서드들은 완전히 공통화된 YModem 프로토콜 처리 로직
     protected boolean syncData(Context context, InputStream inputStream, OutputStream outputStream) throws IOException {
         try {
             RtuSnapshot snapshot;
@@ -301,29 +270,43 @@ public abstract class YModemAbstractServer implements YModemServerInterface {
             logMessage("불러올 Json 파일 절대 경로 : " + file.getAbsolutePath());
             logMessage("불러올 Json 파일 존재 여부 : " + file.exists());
 
+
             if (file.exists()) {
+                // 파일에서 기존 데이터 읽어오기
                 String jsonString = readJsonFile(file);
                 snapshot = gson.fromJson(jsonString, RtuSnapshot.class);
+
                 logMessage("8-0. [RX] 센서 데이터: 파일에서 로드됨");
 
+                // timestamp 갱신
                 snapshot.timestamp = getCurrentTimestamp();
                 updateTimestampToFile(context, snapshot);
                 logMessage("8-0. [RX] JSON 파일에 timestamp 갱신됨");
+
             } else {
-                logMessage("8-0. [RX] RtuStatus.json 파일 없음, 더미 데이터로 대체");
+                // 파일이 없으면 더미 데이터 생성
+                logMessage("8-0. [RX] RtuStatus.json 파일 없음, 더미 데이터로 생성");
+
                 snapshot = createDummyData();
                 snapshot.timestamp = getCurrentTimestamp();
-
                 updateTimestampToFile(context, snapshot);
+
                 logMessage("8-0. [RX] 더미 JSON 파일 생성됨");
             }
 
-            String finalJson = readJsonFile(file);
-            byte[] dataBytes = finalJson.getBytes("UTF-8");
+            RtuSnapshotType wrapper = new RtuSnapshotType("All", snapshot); // 최상단 구조에 "type": "All" 추가
 
-            outputStream.write(dataBytes);
-            outputStream.flush();
+            String json = gson.toJson(wrapper); // DataClass to String(Json)
 
+            byte[] dataBytes = json.getBytes("UTF-8");  // String(Json) to Byte[]
+
+
+            // 06/25 클라이언트 딴에서 전체 데이터 동기화와 Trigger 일부 데이터 동기화를 구분하기 위해 Json 데이터 앞단에 Header를 추가함
+            byte[] packet = new byte[1 + dataBytes.length];   // 전체 전송할 바이트 배열 생성 (헤더 + JSON)
+            packet[0] = HEADER_ALL;
+            System.arraycopy(dataBytes, 0, packet, 1, dataBytes.length);
+
+            outputStream.write(packet); // OutputStream 으로 전송
             logMessage("8-1. [RX] 센서 데이터 전송 성공");
             return true;
 
@@ -331,44 +314,6 @@ public abstract class YModemAbstractServer implements YModemServerInterface {
             logMessage("8-100. [RX] 센서 데이터 전송 실패 (IOException), " + e.getCause() + ", " + e.getMessage());
             return false;
         }
-    }
-
-    // 🔥 이하 모든 메서드들은 완전히 공통화된 YModem 프로토콜 처리 로직
-    protected boolean sendTriggerData(Context context, OutputStream outputStream,
-                                      float waterLevel, int rtuId) throws IOException {
-        try {
-            String triggerJson = createTriggerJson(waterLevel, rtuId);
-            byte[] dataBytes = triggerJson.getBytes("UTF-8");
-
-            outputStream.write(dataBytes);
-            outputStream.flush();
-
-            logMessage("✔ 트리거 데이터 전송 성공: " + triggerJson
-                .replace("\n", " ")
-                .replace("\t", " ")
-                .replace("     ", " ")
-                .replace("   ", " ")
-
-            );
-            return true;
-
-        } catch (IOException e) {
-            logMessage("❌ 트리거 데이터 전송 실패: " + e.getCause() + ": " + e.getMessage());
-            return false;
-        }
-    }
-
-    private String createTriggerJson(float waterLevel, int rtuId) {
-        String timestamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.KOREA)
-            .format(new Date());
-
-        return "{\n" +
-                "  \"timestamp\": \"" + timestamp + "\",\n" +
-                "  \"data\": {\n" +
-                "    \"waterLevel\": " + waterLevel + ",\n" +
-                "    \"rtuId\": " + rtuId + "\n" +
-                "  }\n" +
-                "}";
     }
 
     protected void waitSeconds(int waitTime) {
@@ -430,13 +375,8 @@ public abstract class YModemAbstractServer implements YModemServerInterface {
     protected void sendByte(OutputStream outputStream, byte data, String message) throws IOException {
         outputStream.write(data);
         outputStream.flush();
-        logMessage(message);
-    }
 
-    protected byte receiveByte(InputStream inputStream) throws IOException {
-        byte[] buffer = new byte[1];
-        if (inputStream.read(buffer) > 0) return buffer[0];
-        return -1;
+        logMessage(message);
     }
 
     protected void handleError(Exception e) {
@@ -477,6 +417,29 @@ public abstract class YModemAbstractServer implements YModemServerInterface {
         logMessage("[X] " + getServerType() + " Unhandled error occurred. Restarting server socket.");
         closeExistingServerSocket();
     }
+
+    protected void runShellCommand(String cmd) {
+        try {
+            Process process = Runtime.getRuntime().exec(cmd);
+
+            BufferedReader stdOut = new BufferedReader(new InputStreamReader(process.getInputStream()));
+            BufferedReader stdErr = new BufferedReader(new InputStreamReader(process.getErrorStream()));
+
+            int exitCode = process.waitFor();
+            logMessage("Command: " + cmd + " (exit=" + exitCode + ")");
+
+            String line;
+            while ((line = stdOut.readLine()) != null) {
+                logMessage("[stdout] " + line);
+            }
+            while ((line = stdErr.readLine()) != null) {
+                logMessage("[stderr] " + line);
+            }
+        } catch (Exception e) {
+            logMessage("Command failed: " + cmd + " / " + e.getMessage());
+        }
+    }
+
 
     protected void rebootDevice() {
         try {
@@ -564,7 +527,7 @@ public abstract class YModemAbstractServer implements YModemServerInterface {
 
     public static void RemovePadding(String filePath, Long expectedSize) {
         long actualSize, paddingStart;
-        int remainder = 1024 - (int) (expectedSize % 1024);
+        int remainder = 512 - (int) (expectedSize % 512);
         RandomAccessFile file = null;
 
         try {

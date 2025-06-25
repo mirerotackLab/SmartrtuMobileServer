@@ -35,9 +35,9 @@ public class Modem {
 
     protected static final int MAXERRORS = 10;
 
-    protected static final int BLOCK_TIMEOUT = 10_000;
-    protected static final int REQUEST_TIMEOUT = 3_000;
-    protected static final int WAIT_FOR_RECEIVER_TIMEOUT = 60_000;
+    protected static final int BLOCK_TIMEOUT = 20_000;
+    protected static final int REQUEST_TIMEOUT = 10_000;
+    protected static final int WAIT_FOR_RECEIVER_TIMEOUT = 3_600_000; // 1시간
     protected static final int SEND_BLOCK_TIMEOUT = 10_000;
 
     private final String TAG = "TCPCOM";
@@ -58,7 +58,7 @@ public class Modem {
         this.inputStream = inputStream;
         this.outputStream = outputStream;
         shortBlockBuffer = new byte[128];
-        longBlockBuffer = new byte[1024];
+        longBlockBuffer = new byte[512];
     }
 
     private int blockNumber = 0; // 📌 블록 번호 변수 추가
@@ -95,7 +95,7 @@ public class Modem {
         int errorCount = 0; // 오류 횟수 카운트
 
         // 1. 송신자의 첫 번째 데이터 블록 수신 대기
-        Timer timer = new Timer(REQUEST_TIMEOUT); // 타임아웃 타이머 설정
+        Timer timer = new Timer(WAIT_FOR_RECEIVER_TIMEOUT); // 타임아웃 타이머 설정
 
         while (errorCount < MAXERRORS) {
             // 📤 전송 시작 요청 (송신자가 응답할 때까지 반복 전송)
@@ -104,22 +104,28 @@ public class Modem {
 
             timer.start(); // 타이머 시작
 
-            character = readByte(timer); // 📥 송신자로부터 응답 수신
+            logMessage("sendStartSignal");
+            character = readOneByte(timer); // C 체크
             if (character == 'C') {
                 logMessage("2-2. [RX] C");
+            } else {
+                logMessage("2-2. [RX] C 아님 -> " + character);
             }
 
             try {
                 while (true) {
-                    character = readByte(timer); // 📥 송신자로부터 응답 수신
+                    logMessage("sendStartSignal - while문");
+                    character = readOneByte(timer); // SOH, STX 체크
 
                     if (character == SOH || character == STX) {
                         // 📌 송신자가 데이터 블록 전송을 시작하면 해당 블록 타입(SOH/STX)을 반환
+                        logMessage("[O] character : " + character);
                         return character;
                     }
                 }
             } catch (TimeoutException ignored) {
                 // 📌 타임아웃 발생 시 재시도
+                logMessage("[X] Timeout, 수신된 데이터 없음");
                 errorCount++;
             }
         }
@@ -137,7 +143,8 @@ public class Modem {
             timer.start();
             try {
                 while (true) {
-                    character = readByte(timer);
+                    logMessage("readNextBlockStart");
+                    character = readOneByte(timer); // SOH, STX, EOT 체크
 
                     if (character == SOH || character == STX || character == EOT) {
                         return character;
@@ -159,9 +166,9 @@ public class Modem {
         }
     }
 
-    private void shortSleep() {
+    private void shortSleep(int ms) {
         try {
-            Thread.sleep(10);
+            Thread.sleep(ms);
         } catch (InterruptedException e) {
             try {
                 interruptTransmission();
@@ -187,6 +194,7 @@ public class Modem {
      * @param blockNumber 현재 읽어야 할 블록 번호 (0부터 시작)
      * @param shortBlock  128바이트(SOH) 또는 1024바이트(STX) 블록 여부, 사실상 isHeader와 값동일
      * @param YModemCrc16 CRC16 체크 방식
+     * @param serverType
      * @return 수신된 데이터 블록 (byte 배열)
      * @throws IOException                  입출력 예외 발생 시
      * @throws TimeoutException             타임아웃 발생 시
@@ -194,22 +202,23 @@ public class Modem {
      * @throws SynchronizationLostException 블록 동기화 오류 발생 시
      * @throws InvalidBlockException        블록 데이터 오류 발생 시
      */
-    // STX(1)는 이미 읽고 호출함 + 블록번호(1) + 블록번호 보수(1) + 데이터(1024) + CRC(2)
-    protected byte[] readBlock(int blockNumber, boolean shortBlock, YModemCRC16 YModemCrc16, int packet_number, int totalPacketSize)
+    // STX(1)는 이미 읽고 호출함 + 블록번호(1) + 블록번호 보수(1) + 데이터(512) + CRC(2)
+    protected byte[] readBlock(int blockNumber, boolean shortBlock, YModemCRC16 YModemCrc16, int packet_number, int totalPacketSize, String serverType)
             throws IOException, TimeoutException, RepeatedBlockException, SynchronizationLostException, InvalidBlockException {
 
-        // 📌 1. 블록 버퍼 할당 (128바이트 or 1024바이트)
+        // 📌 1. 블록 버퍼 할당 (128바이트 or 512바이트)
         byte[] block;
         Timer timer = new Timer(BLOCK_TIMEOUT).start(); // 타임아웃 설정
 
         if (shortBlock) {
             block = shortBlockBuffer; // 128바이트 버퍼
         } else {
-            block = longBlockBuffer; // 1024바이트 버퍼
+            block = longBlockBuffer; // 512바이트 버퍼
         }
 
         // 📌 2. 블록 번호 수신 (보낸 블록과 동일해야 함)
-        byte character = readByte(timer); // read 블록번호(1)
+        logMessage("readBlock - 블록 번호");
+        byte character = readOneByte(timer); // read 블록번호(1)
 
         if ((character & 0xFF) == blockNumber - 1) {
             // 📌 같은 블록을 반복 수신하면, 이전 ACK 손실 가능성 있음
@@ -226,7 +235,8 @@ public class Modem {
         }
 
         // 📌 3. 블록 번호 보정 (보낸 블록 번호의 1의 보수 값)
-        byte character1 = readByte(timer); // read 보수(1)
+        logMessage("readBlock - 3. 블록 번호 보수값 read");
+        byte character1 = readOneByte(timer); // read 보수(1)
 
         // 📌 보정 값이 일치하지 않으면 데이터 오류
         if ((character1 & 0xFF) != (~blockNumber & 0xFF)) {
@@ -237,10 +247,17 @@ public class Modem {
 
         // 📌 4. 실제 데이터 블록 수신
         // Java의 InputStream.read(byte[], int, int)는 최대 length 바이트를 읽을 뿐,
-        // 실제로는 버퍼에 도착한 데이터만큼만 읽고 루프를 종료함
+        // 실제로는 버퍼에 도착한 데이터 만큼만 읽고 루프를 종료함
         // 특히 TCP는 스트림 기반이라 1024B 단위로 딱딱 떨어지지 않음
-        // inputStream.read(block, 0, block.length);            -> 실제로 block.length 만큼 읽는 것을 보장하지 않는다.
-        readFully(inputStream, block, 0, block.length);   // 정확히 1KB가 채워져야 종료됨
+        if (serverType.equals("BLUETOOTH")) {
+            logMessage("데이터 수신 요청 : inputStream.read(block, 0, block.length), blockSize : " + block.length);
+            inputStream.read(block, 0, block.length);           // 실제로 block.length 만큼 읽는 것을 보장하지 않는다.
+        } else if(serverType.equals("TCP")) {
+            readFully(inputStream, block, 0, block.length);   // 정확히 1KB가 채워져야 종료됨
+        } else {
+            logMessage("서버 타입이 올바르지 않습니다. : " + serverType);
+        }
+
 
         int unit = Math.max(1, (totalPacketSize + 2) / 10);
         if (packet_number % unit == 0 || packet_number + 1 == totalPacketSize) {
@@ -251,7 +268,8 @@ public class Modem {
         int crcBytesRead = 0;
         byte[] crcBuffer = new byte[YModemCrc16.getCRCLength()];
         while (crcBytesRead < YModemCrc16.getCRCLength()) {
-            crcBuffer[crcBytesRead] = readByte(timer); // read CRC(2)
+            logMessage("readBlock - CRC 2Byte");
+            crcBuffer[crcBytesRead] = readOneByte(timer); // read CRC(2)
             crcBytesRead++;
         }
 
@@ -278,17 +296,34 @@ public class Modem {
         return block; // 📌 최종적으로 검증된 데이터 블록 반환
     }
 
-    private byte readByte(Timer timer) throws IOException, TimeoutException {
-        while (true) {
-            if (inputStream.available() > 0) {
-                int b = inputStream.read();
-                return (byte) b;
+    // 전부다 1Byte 수신을 위해 사용함
+    private byte readOneByte(Timer timer) throws IOException, TimeoutException {
+        timer.start();
+
+        while (!timer.isExpired()) {
+            try {
+                // `Log.d(TAG, "수신 가능한 바이트 수 : " + inputStream.available());
+                // TODO : 데이터 수신 시, 버퍼 크기 지정 이걸 512로 변경하면 데이터 1개씩이 아니라 512개 씩 받는데 
+                //  중요한 건 512개 씩 받아야 하는 로직은 이 함수를 호출하고 있지 않은데 실제로는 호출하고 있음... 
+                //  누가 호출하는 지 찾아야 함
+                if (inputStream.available() > 0) {
+                    logMessage("readByte, 6개 중 하나는 여러 데이터 수신용임");
+                    byte[] buffer = new byte[512];
+                    inputStream.read(buffer); // blocking read
+
+                    return buffer[0];
+                }
+            } catch (IOException e) {
+                shortSleep(5000); // 일시적 실패 대비
             }
-            if (timer.isExpired()) {
-                throw new TimeoutException();
-            }
-            shortSleep();
         }
+
+        // TODO : TCP는 아래와 같이 씀
+        // if (inputStream.available() > 0) {
+        //     return (byte) inputStream.read(); // blocking read
+        // }
+
+        throw new TimeoutException();
     }
 
     /**

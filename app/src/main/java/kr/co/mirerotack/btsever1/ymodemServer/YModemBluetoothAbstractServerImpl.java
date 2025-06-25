@@ -1,219 +1,340 @@
 package kr.co.mirerotack.btsever1.ymodemServer;
 
-import android.bluetooth.BluetoothServerSocket;
-import android.bluetooth.BluetoothSocket;
 import android.content.Context;
-import android.util.Log;
+
+import org.json.JSONException;
+import org.json.JSONObject;
 
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
-import java.util.UUID;
+
+import kr.co.mirerotack.btsever1.NativeBtServer;
+import kr.co.mirerotack.btsever1.model.NativeBTStatusListener;
 
 import static kr.co.mirerotack.btsever1.utils.Logger.logMessage;
 
 /**
- * Bluetooth 서버 구현체 - AbstractYModemServer를 상속받아 Bluetooth 전용 로직만 구현
- * TCP와 달리 Bluetooth는 별도 스레드(AcceptThread)를 통해 연결을 관리하며,
- * 페어링된 장치와의 RFCOMM 통신을 담당합니다
+ * JNI RFCOMM Socket을 사용하는 Bluetooth 서버 구현체 (트리거 포함)
+ * 기존에 만들어진 NativeBluetoothInputStream/OutputStream을 활용
  */
-public class YModemBluetoothAbstractServerImpl extends YModemAbstractServer {
-    private static final String TAG = "YModemBluetoothServer"; // 로그 출력용 태그
-    private static final String SERVICE_NAME = "YModemBluetoothServer"; // Bluetooth 서비스 이름 (클라이언트에서 검색 가능)
-    private static final UUID SERVICE_UUID = UUID.fromString("00001101-0000-1000-8000-00805F9B34FB"); // SPP(Serial Port Profile) 표준 UUID
+public class YModemBluetoothAbstractServerImpl extends YModemAbstractServer implements NativeBTStatusListener {
+    private static final String TAG = "YModemBluetoothJniServer";
 
-    private BluetoothServerSocket bluetoothServerSocket; // 클라이언트 연결을 대기하는 Bluetooth 서버 소켓
-    private BluetoothSocket bluetoothClientSocket; // 연결된 클라이언트와 통신하는 Bluetooth 소켓
-    private AcceptThread acceptThread; // 클라이언트 연결 수락을 담당하는 별도 스레드
+    // JNI 연결 상태 관리용 필드들
+    private volatile boolean isClientConnected = false; // 클라이언트 연결 상태 (volatile로 스레드 안전성 보장)
+    private volatile String clientMacAddress = ""; // 연결된 클라이언트 MAC 주소
+    private volatile Object connectionLock = new Object(); // 연결 대기용 락 객체
+
+    // JNI 스트림들 (이미 구현된 클래스 활용)
+    private NativeBluetoothInputStream inputStream;
+    private NativeBluetoothOutputStream outputStream;
+
+    // 트리거 관련 필드
+    private Thread triggerThread; // 트리거 전송 스레드
+    private static final int TRIGGER_INTERVAL_MS = 10000; // 1초마다 전송
+
+    private static final byte HEADER_ALL = 0x41;      // 전체 동기화 == "A"
+    private static final byte HEADER_TRIGGER = 0x54;  // 트리거 데이터 == "T"
 
     /**
-     * Bluetooth 서버 생성자
-     * @param apkDownloadPath APK 파일을 저장할 디렉토리 경로
-     * @param context Android 애플리케이션 컨텍스트 (Bluetooth 권한 및 시스템 접근용)
+     * JNI Bluetooth 서버 생성자
+     * @param apkDownloadPath APK 파일 저장 경로
+     * @param context 애플리케이션 컨텍스트
      */
     public YModemBluetoothAbstractServerImpl(File apkDownloadPath, Context context) {
-        super(apkDownloadPath, context); // 부모 클래스의 공통 초기화 실행
+        super(apkDownloadPath, context);
+
+        // 이미 구현된 JNI 스트림들 초기화
+        this.inputStream = new NativeBluetoothInputStream();
+        this.outputStream = new NativeBluetoothOutputStream();
+
+        // JNI 콜백 리스너 설정
+        NativeBtServer.setListener(this);
     }
 
-    /**
-     * 서버 타입 이름을 반환합니다 (로그 출력용)
-     * @return "Bluetooth" 문자열
-     */
     @Override
     protected String getServerType() {
-        return "Bluetooth";
+        return "BLUETOOTH";
     }
 
     /**
-     * Bluetooth 서버를 시작합니다
-     * TCP와 달리 별도의 AcceptThread를 생성하여 연결 관리를 위임합니다
-     * @param channel 사용하지 않음 (Bluetooth는 UUID로 채널 관리)
-     * @throws IOException 스레드 시작 실패 시 예외 발생
+     * JNI RFCOMM 서버 시작
+     * @param channel 사용하지 않음 (JNI에서 자동 할당)
+     * @throws IOException 서버 시작 실패 시
      */
     @Override
     protected void startServerSocket(int channel) throws IOException {
-        // Bluetooth는 별도의 AcceptThread로 처리 (TCP와 다른 비동기 방식)
-        startAcceptThread();
+        try {
+            // JNI 서버를 별도 스레드에서 시작 (블로킹 호출이므로)
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        logMessage("[O] JNI 블루투스 서버 시작 중...");
+                        int result = NativeBtServer.createBluetoothServer(); // JNI 서버 시작 (블로킹)
+
+                        if (result == 0) {
+                            logMessage("[O] JNI 블루투스 서버 시작 성공");
+                        } else {
+                            logMessage("[X] JNI 블루투스 서버 시작 실패: " + result);
+                        }
+                    } catch (Exception e) {
+                        logMessage("[X] JNI 서버 시작 중 예외 발생: " + e.getMessage());
+                    }
+                }
+            }).start();
+
+            // 트리거 서버 시작
+            startBluetoothTriggerServer();
+
+            logMessage("[O] JNI RFCOMM 서버 스레드가 시작되었습니다");
+
+        } catch (Exception e) {
+            throw new IOException("JNI 블루투스 서버 시작 실패: " + e.getMessage());
+        }
+    }
+
+    @Override
+    protected void closeServerSocket() throws IOException {
+        if (!NativeBtServer.nativeIsConnected()) {
+            return;
+        }
+        NativeBtServer.closeBluetoothServer();
     }
 
     /**
-     * 클라이언트 연결을 대기합니다
-     * AcceptThread에서 연결이 완료될 때까지 폴링 방식으로 대기
-     * @return 연결된 BluetoothSocket 객체
-     * @throws IOException 연결 대기 중 인터럽트 발생 시 예외 발생
+     * Bluetooth 트리거 서버 시작 (기존 RFCOMM 연결 재사용)
+     */
+    private void startBluetoothTriggerServer() {
+        triggerThread = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                logMessage("[O] Bluetooth 트리거 서비스 시작 (기존 JNI 연결 재사용)");
+
+                // 트리거 전송 루프
+                while (isRunning) {
+                    try {
+                        // JNI 연결이 있는지 확인
+                        if (!NativeBtServer.nativeIsConnected()) {
+                            logMessage("[W] Bluetooth 연결 없음 - 트리거 대기 중");
+                            Thread.sleep(TRIGGER_INTERVAL_MS); // 5초 대기 후 재확인
+                            continue;
+                        }
+
+                        // 연결된 상태에서 주기적으로 트리거 데이터 전송
+                        while (isRunning && NativeBtServer.nativeIsConnected()) {
+                            boolean success = sendBluetoothTriggerData(outputStream, 77.7f, 123);
+
+                            if (!success) {
+                                logMessage("[X] Bluetooth 트리거 데이터 전송 실패");
+                                break; // 전송 실패 시 외부 루프로 복귀하여 재연결 대기
+                            }
+
+                            Thread.sleep(TRIGGER_INTERVAL_MS); // 1초 대기
+                        }
+
+                    } catch (InterruptedException e) {
+                        logMessage("[O] Bluetooth 트리거 스레드 인터럽트됨");
+                        break;
+                    } catch (Exception e) {
+                        logMessage("[X] Bluetooth 트리거 오류: " + e.getMessage());
+                    }
+                }
+
+                logMessage("[O] Bluetooth 트리거 서비스 종료됨");
+            }
+        });
+
+        // TODO : 0625, 데이터 송-수신 타입 변환 테스트를 위해 임시로 Trigger 데이터는 송신을 막음
+        // triggerThread.start();
+    }
+
+    /**
+     * Bluetooth 트리거 데이터 전송
+     * @param outputStream JNI 출력 스트림
+     * @param waterLevel 수위 값
+     * @param rtuId RTU ID
+     * @return 전송 성공 시 true
+     */
+    private boolean sendBluetoothTriggerData(OutputStream outputStream, float waterLevel, int rtuId) {
+        try {
+            String triggerJson = createTriggerJson("Trigger", waterLevel, rtuId);
+            byte[] dataBytes = triggerJson.getBytes("UTF-8");
+
+            // 06/25 클라이언트 딴에서 전체 데이터 동기화와 Trigger 일부 데이터 동기화를 구분하기 위해 Json 데이터 앞단에 Header를 추가함
+            byte[] packet = new byte[1 + dataBytes.length];   // 전체 전송할 바이트 배열 생성 (헤더 + JSON)
+            packet[0] = HEADER_TRIGGER;
+            System.arraycopy(dataBytes, 0, packet, 1, dataBytes.length);
+
+            outputStream.write(packet);
+            outputStream.flush();
+
+            logMessage("✔ Bluetooth 트리거 데이터 전송 성공 (" + dataBytes.length + " bytes)");
+            return true;
+
+        } catch (Exception e) {
+            logMessage("❌ Bluetooth 트리거 데이터 전송 실패: " + e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * 트리거 JSON 데이터 생성
+     * @param waterLevel 수위 값
+     * @param rtuId RTU ID
+     * @return JSON 문자열
+     */
+    private String createTriggerJson(String type, float waterLevel, int rtuId) throws JSONException {
+        String timestamp = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", java.util.Locale.KOREA)
+                .format(new java.util.Date());
+
+        JSONObject data = new JSONObject();
+        data.put("timestamp", timestamp);
+        data.put("waterLevel", waterLevel);
+        data.put("rtuId", rtuId);
+
+        JSONObject json = new JSONObject();
+        json.put("type", type);
+        json.put("data", data);
+
+        return json.toString();
+    }
+
+    /**
+     * @return 더미 객체 (실제로는 JNI 연결 상태만 중요)
+     * @throws IOException 연결 대기 중 인터럽트 발생 시
+     */
+    /**
+     * 클라이언트 연결 대기 - JNI 콜백을 통해 연결될 때까지 대기
+     * @return 더미 객체 (실제로는 JNI 연결 상태만 중요)
+     * @throws IOException 연결 대기 중 인터럽트 발생 시
      */
     @Override
     protected Object acceptClientConnection() throws IOException {
-        // AcceptThread에서 연결이 완료될 때까지 대기 (폴링 방식)
-        while (bluetoothClientSocket == null && isRunning) {
-            try {
-                Thread.sleep(100); // 100ms마다 연결 상태 확인
-            } catch (InterruptedException e) {
-                throw new IOException("Bluetooth connection interrupted");
+        synchronized (connectionLock) {
+            // JNI 콜백을 통해 연결이 완료될 때까지 대기
+            while (!isClientConnected && isRunning) {
+                try {
+                    connectionLock.wait(1000); // 1초마다 타임아웃으로 상태 확인
+                } catch (InterruptedException e) {
+                    throw new IOException("블루투스 연결 대기 중 인터럽트 발생");
+                }
             }
         }
-        return bluetoothClientSocket; // 연결된 소켓 반환
+
+        if (!isRunning) {
+            throw new IOException("서버가 종료되었습니다");
+        }
+
+        return "JNI_CONNECTION"; // 더미 객체 반환 (실제 소켓 객체가 아님)
     }
 
     /**
-     * Bluetooth 소켓에서 입력 스트림을 획득합니다
-     * @param clientConnection 클라이언트 연결 객체 (BluetoothSocket으로 캐스팅됨)
-     * @return 데이터 수신용 InputStream
-     * @throws IOException 스트림 획득 실패 시 예외 발생
+     * 입력 스트림 반환 - 이미 구현된 NativeBluetoothInputStream 사용
      */
     @Override
-    protected InputStream getInputStream(Object clientConnection) throws IOException {
-        return ((BluetoothSocket) clientConnection).getInputStream();
+    protected InputStream getInputStream(Object clientConnection) {
+        return inputStream;
     }
 
     /**
-     * Bluetooth 소켓에서 출력 스트림을 획득합니다
-     * @param clientConnection 클라이언트 연결 객체 (BluetoothSocket으로 캐스팅됨)
-     * @return 데이터 송신용 OutputStream
-     * @throws IOException 스트림 획득 실패 시 예외 발생
+     * 출력 스트림 반환 - 이미 구현된 NativeBluetoothOutputStream 사용
      */
     @Override
-    protected OutputStream getOutputStream(Object clientConnection) throws IOException {
-        return ((BluetoothSocket) clientConnection).getOutputStream();
+    protected OutputStream getOutputStream(Object clientConnection) {
+        return outputStream;
     }
 
     /**
-     * Bluetooth 클라이언트 연결을 안전하게 종료합니다
-     * @param clientConnection 종료할 클라이언트 연결 객체
+     * 클라이언트 연결 종료 - JNI 연결 상태 초기화
      */
     @Override
     protected void closeClientConnection(Object clientConnection) {
-        try {
-            if (clientConnection != null) {
-                ((BluetoothSocket) clientConnection).close();
-            }
-        } catch (IOException e) {
-            logMessage("[X] Bluetooth socket close error: " + e.getMessage());
+        synchronized (connectionLock) {
+            isClientConnected = false;
+            clientMacAddress = "";
+            logMessage("[O] JNI 클라이언트 연결이 종료되었습니다");
         }
     }
 
     /**
-     * 연결된 Bluetooth 클라이언트의 정보를 문자열로 반환합니다
-     * @param clientConnection 클라이언트 연결 객체
-     * @return 클라이언트 장치명과 MAC 주소 (예: "Galaxy S21 (00:11:22:33:44:55)")
+     * 클라이언트 정보 반환
      */
     @Override
     protected String getClientInfo(Object clientConnection) {
-        BluetoothSocket socket = (BluetoothSocket) clientConnection;
-        return socket.getRemoteDevice().getName() + " (" + socket.getRemoteDevice().getAddress() + ")";
-    }
-
-    @Override
-    protected boolean isConnected(Object clientConnection) {
-        return ((BluetoothSocket)clientConnection).isConnected();
+        return "Bluetooth Client (" + clientMacAddress + ")";
     }
 
     /**
-     * Bluetooth 서버의 모든 리소스를 안전하게 정리합니다
-     * AcceptThread, 서버 소켓, 클라이언트 소켓을 순차적으로 종료
+     * 연결 상태 확인
+     */
+    @Override
+    protected boolean isConnected(Object clientConnection) {
+        return isClientConnected && NativeBtServer.nativeIsConnected();
+    }
+
+    /**
+     * 서버 소켓 종료 - JNI 리소스 정리
      */
     @Override
     public void closeExistingServerSocket() {
         try {
-            // 1. AcceptThread 종료 (새로운 연결 수락 중단)
-            if (acceptThread != null) {
-                acceptThread.cancel();
-                acceptThread = null;
+            synchronized (connectionLock) {
+                isClientConnected = false;
+                connectionLock.notifyAll(); // 대기 중인 스레드들을 깨움
             }
-            // 2. 서버 소켓 종료 (연결 대기 중단)
-            if (bluetoothServerSocket != null) {
-                bluetoothServerSocket.close();
-                logMessage("[O] Bluetooth server socket closed successfully");
-            }
-            // 3. 클라이언트 소켓 종료 (기존 연결 종료)
-            if (bluetoothClientSocket != null) {
-                bluetoothClientSocket.close();
-                logMessage("[O] Bluetooth client socket closed successfully");
-            }
-        } catch (IOException e) {
-            logMessage("[X] Failed to close Bluetooth server socket: " + e.getMessage());
+
+            NativeBtServer.closeBluetoothServer(); // JNI 소켓 종료
+            logMessage("[O] JNI 블루투스 서버가 정상적으로 종료되었습니다");
+
+        } catch (Exception e) {
+            logMessage("[X] JNI 블루투스 서버 종료 실패: " + e.getMessage());
         }
     }
 
     /**
-     * Bluetooth 서버가 현재 실행 중인지 상태를 확인합니다
-     * @return 서버가 실행 중이면 true, 아니면 false
+     * 서버 실행 상태 확인
      */
     @Override
     public boolean isRunning() {
-        return isRunning; // 부모 클래스의 상태 플래그 사용
+        return isRunning;
+    }
+
+    // ==================== JNI 콜백 인터페이스 구현 ====================
+
+    /**
+     * JNI에서 클라이언트 연결 시 호출되는 콜백
+     * 기존 MainActivity의 nativeOnConnected 로직을 여기로 이동
+     */
+    @Override
+    public void nativeOnConnected(String macAddress) {
+        logMessage("JNI 콜백: 블루투스 클라이언트 연결됨 - " + macAddress);
+
+        synchronized (connectionLock) {
+            this.isClientConnected = true;
+            this.clientMacAddress = macAddress;
+            connectionLock.notifyAll();          // acceptClientConnection()에서 대기 중인 스레드를 깨움
+        }
+
+        // 여기서 바로 YModem 처리를 시작할 수도 있지만, 기존 구조(acceptClientConnection → handleYModemTransmission)를
+        // 유지하기 위해 연결 상태만 업데이트하고 실제 처리는 부모 클래스에 위임함(YModemAbstractServer의 handleYModemTransmission 메서드)
     }
 
     /**
-     * AcceptThread를 시작하여 클라이언트 연결 수락을 시작합니다
-     * 기존 스레드가 실행 중인 경우 먼저 종료 후 새로 시작
+     * JNI에서 클라이언트 연결 해제 시 호출되는 콜백
      */
-    private void startAcceptThread() {
-        // 기존 AcceptThread가 있으면 종료
-        if (acceptThread != null) {
-            acceptThread.cancel();
-        }
-        acceptThread = new AcceptThread(); // 새로운 AcceptThread 생성
-        acceptThread.start(); // 스레드 시작
-    }
+    @Override
+    public void nativeOnDisconnected() {
+        logMessage("JNI 콜백: 블루투스 클라이언트 연결 해제됨");
 
-    /**
-     * Bluetooth 클라이언트 연결을 수락하고 관리하는 전용 스레드
-     * TCP와 달리 Bluetooth는 어댑터 상태 관리, 페어링 확인 등 복잡한 초기화가 필요하므로
-     * 별도 스레드에서 비동기로 처리합니다
-     */
-    private class AcceptThread extends Thread {
-        private boolean running = true; // 스레드 실행 상태 플래그
-
-        @Override
-        public void run() {
-            // 5. 클라이언트 연결 수락 무한 루프 (서버의 핵심 로직)
-            while (running && isRunning) {
-                // JNI Code로 변경해야함
-                try {
-                    handleYModemTransmission(bluetoothClientSocket); // YModem 프로토콜 처리
-                } catch (Exception e) {
-                    logMessage("[X] YModem 파일 처리 중 오류: " + e.getMessage());
-                    handleError(e); // 부모 클래스의 오류 처리 로직 호출
-                }
-            }
+        synchronized (connectionLock) {
+            this.isClientConnected = false;
+            this.clientMacAddress = "";
+            // connectionLock.notifyAll(); // 추후 필요 시, 대기 중인 스레드들에게 알림
         }
 
-        /**
-         * AcceptThread를 안전하게 종료합니다
-         * 실행 중인 accept() 호출을 중단하고 서버 소켓을 닫습니다
-         */
-        public void cancel() {
-            running = false; // 루프 종료 플래그 설정
-            try {
-                // 서버 소켓을 닫아서 accept() 호출을 중단시킴
-                if (bluetoothServerSocket != null) {
-                    bluetoothServerSocket.close();
-                }
-            } catch (IOException e) {
-                Log.e(TAG, "AcceptThread 취소 중 오류", e);
-            }
-        }
+        // TODO: 재연결 로직이나 추가 정리 작업 수행 가능
     }
 }

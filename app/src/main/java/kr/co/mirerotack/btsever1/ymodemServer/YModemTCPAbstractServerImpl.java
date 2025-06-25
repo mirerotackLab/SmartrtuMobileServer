@@ -13,57 +13,207 @@ import java.net.NetworkInterface;
 import java.net.ServerSocket;
 import java.net.Socket;
 import java.net.SocketException;
+import java.text.SimpleDateFormat;
+import java.util.Date;
 import java.util.Enumeration;
+import java.util.Locale;
 
 import static kr.co.mirerotack.btsever1.utils.Logger.logMessage;
 
 /**
- * TCP 서버 구현체 - AbstractYModemServer를 상속받아 TCP 소켓 전용 로직만 구현
- * YModem 프로토콜 처리는 부모 클래스에서 공통으로 처리되므로 여기서는 TCP 연결 관리만 담당
+ * TCP 서버 구현체 - 트리거 기능 포함
+ * YModem(55556)과 트리거(55557) 두 개의 포트를 사용
  */
 public class YModemTCPAbstractServerImpl extends YModemAbstractServer {
-    private static final String TAG = "YModemTcpServer"; // 로그 출력용 태그
-    private static final int SEND_RECEIVE_BUFFER_SIZE = 32 * 1024; // 송수신 버퍼 크기 (100KB)
+    private static final String TAG = "YModemTcpServer";
+    private static final int SEND_RECEIVE_BUFFER_SIZE = 32 * 1024; // 송수신 버퍼 크기 (32KB)
 
     private Socket socket; // 클라이언트와 연결된 TCP 소켓
     private ServerSocket serverSocket; // 클라이언트 연결을 대기하는 TCP 서버 소켓
 
+    // 트리거 관련 변수들
+    private static final int TRIGGER_PORT = 55557; // 트리거 전용 포트
+    private static final int TRIGGER_INTERVAL_MS = 10000; // 10초마다 전송
+
+    private Thread triggerThread; // 트리거 전송 스레드
+    private ServerSocket triggerServerSocket; // 트리거 전용 서버 소켓
+
     /**
      * TCP 서버 생성자
-     * @param apkDownloadPath APK 파일을 저장할 디렉토리 경로
-     * @param context Android 애플리케이션 컨텍스트 (파일 시스템 접근용)
+     * @param apkDownloadPath APK 파일 저장 경로
+     * @param context 애플리케이션 컨텍스트
      */
     public YModemTCPAbstractServerImpl(File apkDownloadPath, Context context) {
         super(apkDownloadPath, context); // 부모 클래스의 공통 초기화 실행
     }
 
-    /**
-     * 서버 타입 이름을 반환합니다 (로그 출력용)
-     * @return "TCP" 문자열
-     */
     @Override
     protected String getServerType() {
         return "TCP";
     }
 
     /**
-     * TCP 서버 소켓을 생성하고 지정된 포트에 바인딩합니다
-     * @param port 바인딩할 포트 번호 (일반적으로 55556 사용)
-     * @throws IOException 포트 바인딩 실패 시 예외 발생
+     * TCP 서버 소켓 시작 (YModem + 트리거)
      */
     @Override
     protected void startServerSocket(int port) throws IOException {
-        serverSocket = new ServerSocket(); // 새로운 TCP 서버 소켓 생성
-        serverSocket.setReuseAddress(true); // 포트 재사용 허용 (서버 재시작 시 바로 사용 가능)
-        serverSocket.bind(new InetSocketAddress("0.0.0.0", port)); // 모든 네트워크 인터페이스에서 지정 포트로 바인딩
-        logMessage("[O] TCP Port binding successful on " + getLocalIpAddress() + ":" + port);
+        // 1. YModem 서버 소켓 시작
+        serverSocket = new ServerSocket();
+        serverSocket.setReuseAddress(true);
+        serverSocket.bind(new InetSocketAddress("0.0.0.0", port));
+        logMessage("[O] TCP YModem 포트 바인딩 성공: " + getLocalIpAddress() + ":" + port);
+
+        // 2. 트리거 서버 시작
+        startTriggerServer();
+    }
+
+    @Override
+    protected void closeServerSocket() throws IOException {
+        if (serverSocket == null) {
+            return;
+        }
+
+        logMessage("서버 소켓을 종료합니다.");
+        serverSocket.close();
+        serverSocket = null;
     }
 
     /**
-     * 클라이언트 연결 요청을 수락하고 연결된 소켓을 반환합니다
-     * @return 연결된 클라이언트 Socket 객체
-     * @throws IOException 서버 소켓 상태 이상 또는 연결 수락 실패 시 예외 발생
+     * 트리거 서버 시작 (별도 포트 사용)
      */
+    private void startTriggerServer() {
+        triggerThread = new Thread(new Runnable() {
+            @Override
+            public void run() {
+                logMessage("[O] TCP 트리거 서버 시작 (포트: " + TRIGGER_PORT + ")");
+
+                try {
+                    // 트리거 전용 서버 소켓 생성
+                    triggerServerSocket = new ServerSocket(TRIGGER_PORT);
+                    logMessage("[O] TCP 트리거 포트 바인딩 성공: " + getLocalIpAddress() + ":" + TRIGGER_PORT);
+
+                } catch (IOException e) {
+                    logMessage("[X] TCP 트리거 서버 소켓 생성 실패: " + e.getMessage());
+                    return;
+                }
+
+                // 트리거 클라이언트 연결 및 데이터 전송 루프
+                while (isRunning) {
+                    Socket triggerClient = null;
+                    OutputStream triggerOut = null;
+
+                    try {
+                        // 트리거 클라이언트 연결 대기
+                        logMessage("[O] TCP 트리거 클라이언트 연결 대기 중...");
+                        triggerClient = triggerServerSocket.accept();
+
+                        // 소켓 성능 최적화
+                        triggerClient.setTcpNoDelay(true); // 실시간 전송을 위한 Nagle 알고리즘 비활성화
+                        triggerClient.setKeepAlive(true);
+
+                        triggerOut = triggerClient.getOutputStream();
+                        logMessage("[O] TCP 트리거 클라이언트 연결됨: " + triggerClient.getRemoteSocketAddress());
+
+                        // 연결된 클라이언트에게 주기적으로 트리거 데이터 전송
+                        while (isRunning && triggerClient.isConnected() && !triggerClient.isClosed()) {
+                            boolean success = sendTcpTriggerData(triggerOut, 77.7f, 123);
+
+                            if (!success) {
+                                logMessage("[X] TCP 트리거 데이터 전송 실패 - 클라이언트 연결 종료");
+                                break;
+                            }
+
+                            waitSeconds(TRIGGER_INTERVAL_MS);
+                        }
+
+                    } catch (IOException e) {
+                        logMessage("[X] TCP 트리거 연결 오류: " + e.getMessage());
+                        waitSeconds(5000); // 5초 후 재시도
+
+                    } finally {
+                        // 트리거 클라이언트 연결 정리
+                        if (triggerOut != null) {
+                            try {
+                                triggerOut.close();
+                            } catch (IOException e) { /* 무시 */ }
+                        }
+                        if (triggerClient != null && !triggerClient.isClosed()) {
+                            try {
+                                triggerClient.close();
+                                logMessage("[O] TCP 트리거 클라이언트 연결 종료됨");
+                            } catch (IOException e) { /* 무시 */ }
+                        }
+                    }
+                }
+
+                // 트리거 서버 소켓 정리
+                if (triggerServerSocket != null && !triggerServerSocket.isClosed()) {
+                    try {
+                        triggerServerSocket.close();
+                        logMessage("[O] TCP 트리거 서버 소켓 종료됨");
+                    } catch (IOException e) {
+                        logMessage("[X] TCP 트리거 서버 소켓 종료 실패: " + e.getMessage());
+                    }
+                }
+            }
+        });
+
+        // TODO : 0625, 데이터 송-수신 타입 변환 테스트를 위해 임시로 Trigger 데이터는 송신을 막음
+        // triggerThread.start();
+    }
+
+    /**
+     * TCP 트리거 데이터 전송
+     * @param outputStream 출력 스트림
+     * @param waterLevel 수위 값
+     * @param rtuId RTU ID
+     * @return 전송 성공 시 true
+     */
+    private boolean sendTcpTriggerData(OutputStream outputStream, float waterLevel, int rtuId) {
+        try {
+            String triggerJson = createTriggerJson(waterLevel, rtuId);
+            byte[] dataBytes = triggerJson.getBytes("UTF-8");
+
+            // TCP 프로토콜: 데이터 길이 헤더 + JSON 데이터
+            String lengthHeader = dataBytes.length + "\n";
+            // outputStream.write(lengthHeader.getBytes("UTF-8"));
+
+            // 디버깅용 전체 { } 다 붙어있음.
+            // logMessage("TCP 트리거 데이터 : " + new String(dataBytes, "UTF-8"));
+
+            outputStream.write(dataBytes);
+            outputStream.flush();
+
+            logMessage("✔ TCP 트리거 데이터 전송 성공 (" + dataBytes.length + " bytes)");
+            return true;
+
+        } catch (IOException e) {
+            logMessage("❌ TCP 트리거 데이터 전송 실패: " + e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * 트리거 JSON 데이터 생성
+     * @param waterLevel 수위 값
+     * @param rtuId RTU ID
+     * @return JSON 문자열
+     */
+    private String createTriggerJson(float waterLevel, int rtuId) {
+        String timestamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.KOREA)
+                .format(new Date());
+
+        return "{\n" +
+                "  \"timestamp\": \"" + timestamp + "\",\n" +
+                "  \"data\": {\n" +
+                "    \"waterLevel\": " + waterLevel + ",\n" +
+                "    \"rtuId\": " + rtuId + "\n" +
+                "  }\n" +
+                "}";
+    }
+
+    // ==================== 기존 YModem 관련 메서드들 ====================
+
     @Override
     protected Object acceptClientConnection() throws IOException {
         // 서버 소켓 상태 검증 (null, 닫힘, 바인딩 안됨 상태 체크)
@@ -71,48 +221,26 @@ public class YModemTCPAbstractServerImpl extends YModemAbstractServer {
             throw new IOException("TCP Server socket is not ready");
         }
 
-        socket = serverSocket.accept(); // 클라이언트 연결 대기 (블로킹 호출)
-        configureSocket(socket); // 소켓 옵션 설정 (버퍼 크기 등)
-        return socket; // 연결된 소켓 반환
+        socket = serverSocket.accept();   // 클라이언트 연결 대기 (블로킹 호출)
+        configureSocket(socket);          // 소켓 옵션 설정 (버퍼 크기 등)
+        return socket;                    // 연결된 소켓 반환
     }
 
-    /**
-     * 클라이언트 소켓에서 입력 스트림을 획득합니다
-     * @param clientConnection 클라이언트 연결 객체 (Socket으로 캐스팅됨)
-     * @return 데이터 수신용 InputStream
-     * @throws IOException 스트림 획득 실패 시 예외 발생
-     */
     @Override
     protected boolean isConnected(Object clientConnection) {
         return ((Socket) clientConnection).isConnected();
     }
 
-    /**
-     * 클라이언트 소켓에서 입력 스트림을 획득합니다
-     * @param clientConnection 클라이언트 연결 객체 (Socket으로 캐스팅됨)
-     * @return 데이터 수신용 InputStream
-     * @throws IOException 스트림 획득 실패 시 예외 발생
-     */
     @Override
     protected InputStream getInputStream(Object clientConnection) throws IOException {
         return ((Socket) clientConnection).getInputStream();
     }
 
-    /**
-     * 클라이언트 소켓에서 출력 스트림을 획득합니다
-     * @param clientConnection 클라이언트 연결 객체 (Socket으로 캐스팅됨)
-     * @return 데이터 송신용 OutputStream
-     * @throws IOException 스트림 획득 실패 시 예외 발생
-     */
     @Override
     protected OutputStream getOutputStream(Object clientConnection) throws IOException {
         return ((Socket) clientConnection).getOutputStream();
     }
 
-    /**
-     * 클라이언트 연결을 안전하게 종료합니다
-     * @param clientConnection 종료할 클라이언트 연결 객체
-     */
     @Override
     protected void closeClientConnection(Object clientConnection) {
         try {
@@ -125,11 +253,6 @@ public class YModemTCPAbstractServerImpl extends YModemAbstractServer {
         }
     }
 
-    /**
-     * 연결된 클라이언트의 정보를 문자열로 반환합니다
-     * @param clientConnection 클라이언트 연결 객체
-     * @return 클라이언트의 IP 주소와 포트 정보 (예: "/192.168.1.100:54321")
-     */
     @Override
     protected String getClientInfo(Object clientConnection) {
         Socket socket = (Socket) clientConnection;
@@ -137,13 +260,25 @@ public class YModemTCPAbstractServerImpl extends YModemAbstractServer {
     }
 
     /**
-     * 서버 소켓을 안전하게 종료합니다
-     * 서비스 종료 시나 오류 발생 시 호출되어 리소스를 정리합니다
+     * 서버 소켓 종료 (YModem + 트리거 모두 종료)
      */
     @Override
     public void closeExistingServerSocket() {
         try {
-            // 서버 소켓이 열려있는 상태인지 확인 후 종료
+            // 1. 트리거 스레드 종료
+            if (triggerThread != null && triggerThread.isAlive()) {
+                triggerThread.interrupt();
+                try {
+                    triggerThread.join(1000); // 최대 1초 대기
+                } catch (InterruptedException e) { /* 무시 */ }
+            }
+
+            // 2. 트리거 서버 소켓 종료
+            if (triggerServerSocket != null && !triggerServerSocket.isClosed()) {
+                triggerServerSocket.close();
+            }
+
+            // 3. YModem 서버 소켓 종료
             if (serverSocket != null && !serverSocket.isClosed()) {
                 serverSocket.close();
                 logMessage("[O] TCP server socket closed successfully");
@@ -153,10 +288,6 @@ public class YModemTCPAbstractServerImpl extends YModemAbstractServer {
         }
     }
 
-    /**
-     * 서버가 현재 실행 중인지 상태를 확인합니다
-     * @return 서버가 실행 중이고 소켓이 정상 상태이면 true, 아니면 false
-     */
     @Override
     public boolean isRunning() {
         return isRunning && serverSocket != null && !serverSocket.isClosed();
@@ -164,8 +295,6 @@ public class YModemTCPAbstractServerImpl extends YModemAbstractServer {
 
     /**
      * TCP 소켓의 성능 옵션을 설정합니다
-     * @param socket 설정할 TCP 소켓
-     * @throws IOException 소켓 옵션 설정 실패 시 예외 발생
      */
     private void configureSocket(Socket socket) throws IOException {
         // 송신 버퍼 크기 설정 (큰 파일 전송 시 성능 향상)
