@@ -11,7 +11,7 @@ import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStreamReader;
 
-import kr.co.mirerotack.btsever1.RtuSnapshot;
+import kr.co.mirerotack.btsever1.model.RtuSnapshot;
 
 public class readwriteJson {
     static Gson gson = new Gson();

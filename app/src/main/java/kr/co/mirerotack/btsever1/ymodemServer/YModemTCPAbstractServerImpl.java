@@ -33,7 +33,7 @@ public class YModemTCPAbstractServerImpl extends YModemAbstractServer {
 
     // 트리거 관련 변수들
     private static final int TRIGGER_PORT = 55557; // 트리거 전용 포트
-    private static final int TRIGGER_INTERVAL_MS = 1000; // 1초마다 전송
+    private static final int TRIGGER_INTERVAL_MS = 10000; // 10초마다 전송
 
     private Thread triggerThread; // 트리거 전송 스레드
     private ServerSocket triggerServerSocket; // 트리거 전용 서버 소켓
@@ -123,16 +123,12 @@ public class YModemTCPAbstractServerImpl extends YModemAbstractServer {
                                 break;
                             }
 
-                            Thread.sleep(TRIGGER_INTERVAL_MS); // 1초 대기
+                            waitSeconds(TRIGGER_INTERVAL_MS);
                         }
 
                     } catch (IOException e) {
                         logMessage("[X] TCP 트리거 연결 오류: " + e.getMessage());
                         waitSeconds(5000); // 5초 후 재시도
-
-                    } catch (InterruptedException e) {
-                        logMessage("[O] TCP 트리거 스레드 인터럽트됨");
-                        break;
 
                     } finally {
                         // 트리거 클라이언트 연결 정리
@@ -162,7 +158,8 @@ public class YModemTCPAbstractServerImpl extends YModemAbstractServer {
             }
         });
 
-        triggerThread.start();
+        // TODO : 0625, 데이터 송-수신 타입 변환 테스트를 위해 임시로 Trigger 데이터는 송신을 막음
+        // triggerThread.start();
     }
 
     /**
@@ -179,7 +176,11 @@ public class YModemTCPAbstractServerImpl extends YModemAbstractServer {
 
             // TCP 프로토콜: 데이터 길이 헤더 + JSON 데이터
             String lengthHeader = dataBytes.length + "\n";
-            outputStream.write(lengthHeader.getBytes("UTF-8"));
+            // outputStream.write(lengthHeader.getBytes("UTF-8"));
+
+            // 디버깅용 전체 { } 다 붙어있음.
+            // logMessage("TCP 트리거 데이터 : " + new String(dataBytes, "UTF-8"));
+
             outputStream.write(dataBytes);
             outputStream.flush();
 

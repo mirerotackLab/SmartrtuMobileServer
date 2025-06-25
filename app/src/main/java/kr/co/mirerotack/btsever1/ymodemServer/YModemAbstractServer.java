@@ -15,16 +15,12 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.io.RandomAccessFile;
-import java.net.Socket;
-import java.text.SimpleDateFormat;
-import java.util.Date;
-import java.util.Locale;
-import java.util.Objects;
+import java.nio.charset.StandardCharsets;
 
-import kr.co.mirerotack.btsever1.NativeBtServer;
-import kr.co.mirerotack.btsever1.RtuSnapshot;
+import kr.co.mirerotack.btsever1.model.RtuSnapshot;
 import kr.co.mirerotack.btsever1.model.ApkValidationResult;
 import kr.co.mirerotack.btsever1.model.InstallResult;
+import kr.co.mirerotack.btsever1.model.RtuSnapshotType;
 import kr.co.mirerotack.btsever1.model.UninstallResult;
 import kr.co.mirerotack.btsever1.model.YModemServerInterface;
 
@@ -49,6 +45,9 @@ public abstract class YModemAbstractServer implements YModemServerInterface {
     protected static final byte CAN = 0x18; /* 취소 */
     protected static final byte CPMEOF = 0x1A; /* 마지막 패딩 */
     protected static final byte START_ACK = 'C'; /* YModem 시작 신호 */
+
+    private static final byte HEADER_ALL = 0x41;      // 전체 동기화 == "A"
+    private static final byte HEADER_TRIGGER = 0x54;  // 트리거 데이터 == "T"
 
     // 공통 필드들
     protected File APK_PATH;
@@ -198,6 +197,7 @@ public abstract class YModemAbstractServer implements YModemServerInterface {
                 handler.postDelayed(new Runnable() {
                     @Override
                     public void run() {
+                        logMessage("5초 뒤, reboot 수행");
                         rebootDevice();
                     }
                 }, 5000);
@@ -206,7 +206,7 @@ public abstract class YModemAbstractServer implements YModemServerInterface {
 
             // 2️⃣ [RX] APK 수신
             logMessage("5. Waiting for APK data...");
-            File receivedFile = yModem.receive_APK(new File(""), false);
+            File receivedFile = yModem.receive_APK(new File(""), false, getServerType());
 
             if (!checkFileIntegrity(receivedFile, yModem.getExpectedFileSize(), outputStream))
                 return;
@@ -218,7 +218,7 @@ public abstract class YModemAbstractServer implements YModemServerInterface {
             waitSeconds(3000);
 
             while (true) {
-                if (receiveByte(inputStream) == EOT) {
+                if (inputStream.read() == EOT) {
                     logMessage("7-4. [RX] EOT");
                     break;
                 }
@@ -250,16 +250,16 @@ public abstract class YModemAbstractServer implements YModemServerInterface {
             if (outputStream != null) outputStream.close();
             closeClientConnection(clientConnection);
         }
-        // 하나의 트랜잭션 이후 스트림을 종료하던 코드 주석처리
-//        finally {
-//            try {
-//                if (inputStream != null) inputStream.close();
-//                if (outputStream != null) outputStream.close();
-//                closeClientConnection(clientConnection);
-//            } catch (Exception e) {
-//                logMessage("[X] " + getServerType() + " connection close error: " + e.getMessage());
-//            }
-//        }
+
+        if (getServerType().equals("TCP")) {
+            try {
+                if (inputStream != null) inputStream.close();
+                if (outputStream != null) outputStream.close();
+                closeClientConnection(clientConnection);
+            } catch (Exception e) {
+                logMessage("[X] " + getServerType() + " connection close error: " + e.getMessage());
+            }
+        }
     }
 
     protected boolean syncData(Context context, InputStream inputStream, OutputStream outputStream) throws IOException {
@@ -270,29 +270,43 @@ public abstract class YModemAbstractServer implements YModemServerInterface {
             logMessage("불러올 Json 파일 절대 경로 : " + file.getAbsolutePath());
             logMessage("불러올 Json 파일 존재 여부 : " + file.exists());
 
+
             if (file.exists()) {
+                // 파일에서 기존 데이터 읽어오기
                 String jsonString = readJsonFile(file);
                 snapshot = gson.fromJson(jsonString, RtuSnapshot.class);
+
                 logMessage("8-0. [RX] 센서 데이터: 파일에서 로드됨");
 
+                // timestamp 갱신
                 snapshot.timestamp = getCurrentTimestamp();
                 updateTimestampToFile(context, snapshot);
                 logMessage("8-0. [RX] JSON 파일에 timestamp 갱신됨");
+
             } else {
-                logMessage("8-0. [RX] RtuStatus.json 파일 없음, 더미 데이터로 대체");
+                // 파일이 없으면 더미 데이터 생성
+                logMessage("8-0. [RX] RtuStatus.json 파일 없음, 더미 데이터로 생성");
+
                 snapshot = createDummyData();
                 snapshot.timestamp = getCurrentTimestamp();
-
                 updateTimestampToFile(context, snapshot);
+
                 logMessage("8-0. [RX] 더미 JSON 파일 생성됨");
             }
 
-            String finalJson = readJsonFile(file);
-            byte[] dataBytes = finalJson.getBytes("UTF-8");
+            RtuSnapshotType wrapper = new RtuSnapshotType("All", snapshot); // 최상단 구조에 "type": "All" 추가
 
-            outputStream.write(dataBytes);
-            outputStream.flush();
+            String json = gson.toJson(wrapper); // DataClass to String(Json)
 
+            byte[] dataBytes = json.getBytes("UTF-8");  // String(Json) to Byte[]
+
+
+            // 06/25 클라이언트 딴에서 전체 데이터 동기화와 Trigger 일부 데이터 동기화를 구분하기 위해 Json 데이터 앞단에 Header를 추가함
+            byte[] packet = new byte[1 + dataBytes.length];   // 전체 전송할 바이트 배열 생성 (헤더 + JSON)
+            packet[0] = HEADER_ALL;
+            System.arraycopy(dataBytes, 0, packet, 1, dataBytes.length);
+
+            outputStream.write(packet); // OutputStream 으로 전송
             logMessage("8-1. [RX] 센서 데이터 전송 성공");
             return true;
 
@@ -300,43 +314,6 @@ public abstract class YModemAbstractServer implements YModemServerInterface {
             logMessage("8-100. [RX] 센서 데이터 전송 실패 (IOException), " + e.getCause() + ", " + e.getMessage());
             return false;
         }
-    }
-
-    protected boolean sendTriggerData(Context context, OutputStream outputStream,
-                                      float waterLevel, int rtuId) throws IOException {
-        try {
-            String triggerJson = createTriggerJson(waterLevel, rtuId);
-            byte[] dataBytes = triggerJson.getBytes("UTF-8");
-
-            outputStream.write(dataBytes);
-            outputStream.flush();
-
-            logMessage("✔ 트리거 데이터 전송 성공: " + triggerJson
-                .replace("\n", " ")
-                .replace("\t", " ")
-                .replace("     ", " ")
-                .replace("   ", " ")
-
-            );
-            return true;
-
-        } catch (IOException e) {
-            logMessage("❌ 트리거 데이터 전송 실패: " + e.getCause() + ": " + e.getMessage());
-            return false;
-        }
-    }
-
-    private String createTriggerJson(float waterLevel, int rtuId) {
-        String timestamp = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", Locale.KOREA)
-            .format(new Date());
-
-        return "{\n" +
-                "  \"timestamp\": \"" + timestamp + "\",\n" +
-                "  \"data\": {\n" +
-                "    \"waterLevel\": " + waterLevel + ",\n" +
-                "    \"rtuId\": " + rtuId + "\n" +
-                "  }\n" +
-                "}";
     }
 
     protected void waitSeconds(int waitTime) {
@@ -398,13 +375,8 @@ public abstract class YModemAbstractServer implements YModemServerInterface {
     protected void sendByte(OutputStream outputStream, byte data, String message) throws IOException {
         outputStream.write(data);
         outputStream.flush();
-        logMessage(message);
-    }
 
-    protected byte receiveByte(InputStream inputStream) throws IOException {
-        byte[] buffer = new byte[1];
-        if (inputStream.read(buffer) > 0) return buffer[0];
-        return -1;
+        logMessage(message);
     }
 
     protected void handleError(Exception e) {

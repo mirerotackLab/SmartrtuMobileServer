@@ -2,6 +2,9 @@ package kr.co.mirerotack.btsever1.ymodemServer;
 
 import android.content.Context;
 
+import org.json.JSONException;
+import org.json.JSONObject;
+
 import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
@@ -30,7 +33,10 @@ public class YModemBluetoothAbstractServerImpl extends YModemAbstractServer impl
 
     // 트리거 관련 필드
     private Thread triggerThread; // 트리거 전송 스레드
-    private static final int TRIGGER_INTERVAL_MS = 1000; // 1초마다 전송
+    private static final int TRIGGER_INTERVAL_MS = 10000; // 1초마다 전송
+
+    private static final byte HEADER_ALL = 0x41;      // 전체 동기화 == "A"
+    private static final byte HEADER_TRIGGER = 0x54;  // 트리거 데이터 == "T"
 
     /**
      * JNI Bluetooth 서버 생성자
@@ -81,7 +87,7 @@ public class YModemBluetoothAbstractServerImpl extends YModemAbstractServer impl
             }).start();
 
             // 트리거 서버 시작
-            // startBluetoothTriggerServer();
+            startBluetoothTriggerServer();
 
             logMessage("[O] JNI RFCOMM 서버 스레드가 시작되었습니다");
 
@@ -113,7 +119,7 @@ public class YModemBluetoothAbstractServerImpl extends YModemAbstractServer impl
                         // JNI 연결이 있는지 확인
                         if (!NativeBtServer.nativeIsConnected()) {
                             logMessage("[W] Bluetooth 연결 없음 - 트리거 대기 중");
-                            Thread.sleep(5000); // 5초 대기 후 재확인
+                            Thread.sleep(TRIGGER_INTERVAL_MS); // 5초 대기 후 재확인
                             continue;
                         }
 
@@ -134,11 +140,6 @@ public class YModemBluetoothAbstractServerImpl extends YModemAbstractServer impl
                         break;
                     } catch (Exception e) {
                         logMessage("[X] Bluetooth 트리거 오류: " + e.getMessage());
-                        try {
-                            Thread.sleep(5000); // 5초 대기 후 재시도
-                        } catch (InterruptedException ie) {
-                            break;
-                        }
                     }
                 }
 
@@ -146,7 +147,8 @@ public class YModemBluetoothAbstractServerImpl extends YModemAbstractServer impl
             }
         });
 
-        triggerThread.start();
+        // TODO : 0625, 데이터 송-수신 타입 변환 테스트를 위해 임시로 Trigger 데이터는 송신을 막음
+        // triggerThread.start();
     }
 
     /**
@@ -158,13 +160,15 @@ public class YModemBluetoothAbstractServerImpl extends YModemAbstractServer impl
      */
     private boolean sendBluetoothTriggerData(OutputStream outputStream, float waterLevel, int rtuId) {
         try {
-            String triggerJson = createTriggerJson(waterLevel, rtuId);
+            String triggerJson = createTriggerJson("Trigger", waterLevel, rtuId);
             byte[] dataBytes = triggerJson.getBytes("UTF-8");
 
-            // Bluetooth 프로토콜: 특별한 헤더로 YModem과 구분
-            String bluetoothHeader = "TRIGGER:" + dataBytes.length + "\n";
-            outputStream.write(bluetoothHeader.getBytes("UTF-8"));
-            outputStream.write(dataBytes);
+            // 06/25 클라이언트 딴에서 전체 데이터 동기화와 Trigger 일부 데이터 동기화를 구분하기 위해 Json 데이터 앞단에 Header를 추가함
+            byte[] packet = new byte[1 + dataBytes.length];   // 전체 전송할 바이트 배열 생성 (헤더 + JSON)
+            packet[0] = HEADER_TRIGGER;
+            System.arraycopy(dataBytes, 0, packet, 1, dataBytes.length);
+
+            outputStream.write(packet);
             outputStream.flush();
 
             logMessage("✔ Bluetooth 트리거 데이터 전송 성공 (" + dataBytes.length + " bytes)");
@@ -182,17 +186,20 @@ public class YModemBluetoothAbstractServerImpl extends YModemAbstractServer impl
      * @param rtuId RTU ID
      * @return JSON 문자열
      */
-    private String createTriggerJson(float waterLevel, int rtuId) {
+    private String createTriggerJson(String type, float waterLevel, int rtuId) throws JSONException {
         String timestamp = new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss.SSS", java.util.Locale.KOREA)
                 .format(new java.util.Date());
 
-        return "{\n" +
-                "  \"timestamp\": \"" + timestamp + "\",\n" +
-                "  \"data\": {\n" +
-                "    \"waterLevel\": " + waterLevel + ",\n" +
-                "    \"rtuId\": " + rtuId + "\n" +
-                "  }\n" +
-                "}";
+        JSONObject data = new JSONObject();
+        data.put("timestamp", timestamp);
+        data.put("waterLevel", waterLevel);
+        data.put("rtuId", rtuId);
+
+        JSONObject json = new JSONObject();
+        json.put("type", type);
+        json.put("data", data);
+
+        return json.toString();
     }
 
     /**

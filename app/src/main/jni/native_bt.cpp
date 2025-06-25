@@ -268,7 +268,7 @@ Java_kr_co_mirerotack_btsever1_NativeBtServer_nativeRead(JNIEnv *env, jclass cla
 extern "C"
 JNIEXPORT jint JNICALL
 Java_kr_co_mirerotack_btsever1_NativeBtServer_nativeSend(JNIEnv *env, jclass clazz, jbyteArray buffer, jint length) {
-    LOGI("nativeRead 호출, 송신할 데이터 크기 : %d", length);
+    LOGI("nativeSend 호출, 송신할 데이터 크기 : %d", length);
 
     if (g_clientSocket < 0) {
         LOGE("클라이언트 연결 상태 OFF");
@@ -297,6 +297,7 @@ JNIEXPORT jint JNICALL
 Java_kr_co_mirerotack_btsever1_NativeBtServer_nativeAvailable(JNIEnv *env, jclass clazz) {
     if (g_clientSocket < 0) {
         LOGE("nativeAvailable: 소켓이 닫혀 있음");
+        usleep(5000000); // 1초
         return 0;
     }
 

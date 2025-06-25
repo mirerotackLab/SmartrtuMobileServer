@@ -14,9 +14,11 @@ import static kr.co.mirerotack.btsever1.utils.Logger.logMessage;
 public class NativeBluetoothInputStream extends InputStream {
     private static final String TAG = "NativeBTInputStream";
 
-    // 여러 개의 데이터만 읽는 함수
+    // 여러 개의 데이터를 읽는 함수
     @Override
     public int read(byte[] b) throws IOException {
+        logMessage("NativeBluetoothInputStream - read(" + b.length + ") 명령 input 받음");
+
         String tag1 = "[ODN-" + b.length +"] JNI read";
         String tag2 = "[XDN-" + b.length +"] JNI read";
 
@@ -32,22 +34,16 @@ public class NativeBluetoothInputStream extends InputStream {
         int result = NativeBtServer.nativeRead(b);     // JNI 호출
         long endTime = System.currentTimeMillis();
 
-
         long diffTime = endTime - startTime;
-        logMessage(tag1 + " 결과: " + result + " bytes, " +
-                "대기시간: " + diffTime / 1000 + "s " + diffTime % 1000 + "ms");
+        logMessage(tag1 + " 결과: " + result + " bytes, " + "대기시간: " + diffTime / 1000 + "s " + diffTime % 1000 + "ms");
 
         if (result <= 0) {
             logMessage(tag2 + " 결과가 0 이하임 : " + result);
             return -1; // EOF 또는 오류
         }
 
-        // 수신된 데이터 로깅 (처음 10바이트만)
-        StringBuilder hexData = new StringBuilder();
-        for (int i = 0; i < Math.min(result, 10); i++) {
-            hexData.append(String.format("%02X ", b[i] & 0xFF));
-        }
-        logMessage(tag1 + " 수신된 데이터 (hex): " + hexData.toString());
+        String preview = new String(b, 0, Math.min(result, 10), "UTF-8");
+        logMessage(tag1 + " 수신된 데이터 앞 10개 (ASCII): " + preview);
 
         return result;
     }
@@ -55,6 +51,8 @@ public class NativeBluetoothInputStream extends InputStream {
     // 1개의 데이터만 읽는 함수
     @Override
     public int read() throws IOException {
+        logMessage("이거 호출하는 놈 찾기 - single");
+
         logMessage("[D1] JNI read 시작");
 
         byte[] one = new byte[1];

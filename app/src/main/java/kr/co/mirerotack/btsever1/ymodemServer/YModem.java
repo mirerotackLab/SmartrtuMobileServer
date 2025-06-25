@@ -95,7 +95,7 @@ public class YModem {
             int character = modem.sendStartSignal();
             logMessage("[O] character : " + character);
 
-            block = modem.readBlock(0, (character == Modem.SOH), new YModemCRC16(), 0, 128);
+            block = modem.readBlock(0, (character == Modem.SOH), new YModemCRC16(), 0, 128, serverType);
             String headerString = new String(block, Charset.forName("US-ASCII")).trim();
             logMessage("[O] Received header: " + headerString);
 
@@ -154,7 +154,7 @@ public class YModem {
     }
 
     /// **데이터 블록 수신 (APK 본문)**
-    public File receive_APK(File file, boolean ack_mode) throws Exception {
+    public File receive_APK(File file, boolean ack_mode, String serverType) throws Exception {
         block = new byte[512];
         byte[] zeroBlock = new byte[block.length];
         DataOutputStream dataOutput = null;
@@ -182,7 +182,7 @@ public class YModem {
                 }
 
                 byte[] dataBlock = modem.readBlock(
-                        modem.getBlockNumber(), (character == Modem.SOH), new YModemCRC16(), packet_number, totalPacketSize
+                        modem.getBlockNumber(), (character == Modem.SOH), new YModemCRC16(), packet_number, totalPacketSize, serverType
                 );
 
                 if (dataBlock == null) {

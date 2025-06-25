@@ -1,4 +1,4 @@
-package kr.co.mirerotack.btsever1;
+package kr.co.mirerotack.btsever1.model;
 
 import java.util.List;
 

@@ -82,6 +82,7 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
+        Log.e(TAG, "onCreate");
         initUI(); // UI 컴포넌트 초기화
 
         // 브로드캐스트 수신 등록 (서비스에서 상태 변화를 업데이트하기 위함)
@@ -97,12 +98,14 @@ public class MainActivity extends AppCompatActivity {
 
         // 버튼 클릭 리스너 설정
         setupButtonListeners();
+
+        // 선택된 서버 타입으로 시작
+        btnStartServer.performClick();
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        btnStartServer.performClick(); // 선택된 서버 타입으로 시작
 
         // finish();
     }
